@@ -1,59 +1,102 @@
-# AGENTS.md — Project Knowledge Base
+# PROJECT KNOWLEDGE BASE
 
-## Project Overview
+**Updated:** 2026-05-06
+**Commit:** 9d326c0
+**Branch:** master
 
-Check In Memo — A cross-platform habit tracking / check-in app built with Flutter.
-Primary targets: Android (ARM64) and Web.
+## OVERVIEW
 
-## Tech Stack
+Check In Memo — Cross-platform habit check-in app. Flutter 3.38 + Dart 3.10.
+Targets: Android ARM64 + Web. No iOS/macOS.
 
-- **Flutter 3.38** / **Dart 3.10**
-- **Riverpod** for state management (AsyncNotifier pattern)
-- **Hive** for local storage (Map-based serialization, no code generation)
-- **fl_chart** for charts (BarChart API: `tooltipRoundedRadius`, `SideTitleWidget(axisSide:)`)
-- **intl** for Chinese date formatting (requires `initializeDateFormatting('zh_CN')` in main)
-
-## Architecture
+## STRUCTURE
 
 ```
-main.dart → app.dart (MaterialApp3 + bottom nav)
-                ├── HomePage (today's tasks)
-                ├── StatsPage (charts/streaks)
-                └── SettingsPage (task CRUD)
-
-Data flow: UI → Riverpod Providers → StorageService → Hive
+lib/
+├── main.dart              # Entry: Hive + intl init
+├── app.dart               # MaterialApp3 theme + bottom nav shell
+├── models/                # toMap/fromMap serialization, no Hive TypeAdapters
+├── services/              # Hive CRUD + stats (O(n) scans, fine <1k records)
+├── providers/             # Riverpod AsyncNotifier pattern
+├── pages/                 # 3 tabs: home, stats, settings
+└── widgets/               # TaskCard (animated), WeeklyChart, HeatmapCalendar
 ```
 
-## Key Patterns
+## WHERE TO LOOK
 
-- Models use `toMap()` / `fromMap()` serialization (no Hive TypeAdapters)
-- Models override `==` / `hashCode` by `id` field for correct Set/Map behavior
-- `CheckInTask.copyWith()` uses sentinel pattern for nullable fields (can set back to null)
-- Provider invalidation: `ref.invalidateSelf()` after mutations, cross-invalidate `todayRecordsProvider` on task deletion
-- Theme: primary `#FF6B6B`, accent `#4ECDC4`, Material 3 with dark mode support
+| Task | File | Key Symbol |
+|------|------|------------|
+| Add a new data field | `lib/models/task.dart` | `CheckInTask.toMap()` / `fromMap()` |
+| Add a storage query | `lib/services/storage_service.dart` | `StorageService` |
+| Add a new provider | `lib/providers/app_providers.dart` | Follow existing `*Provider` pattern |
+| Change theme colors | `lib/app.dart` | `_buildTheme()` in `CheckInApp` |
+| Add a new tab page | `lib/app.dart` → `_pages` list | `_AppShellState` |
+| Modify task card UI | `lib/widgets/task_card.dart` | `TaskCard` + `_CheckInButton` |
+| Fix chart display | `lib/widgets/weekly_chart.dart` | `_WeeklyChartState._dayLabel()` — uses `DateTime.weekday` |
+| Change heatmap colors | `lib/widgets/heatmap_calendar.dart` | `_cellColor()` |
+| Add task form field | `lib/pages/settings_page.dart` | `_TaskFormState._save()` + form widgets |
 
-## Platform Notes
+## CODE MAP
 
-- Only **Android** and **Web** platforms are configured (ios/macos removed)
-- Android SDK 36 + Build-Tools 36 required by Flutter 3.38
-- Gradle needs proxy config in `~/.gradle/gradle.properties` for CN networks
-- Web build: `flutter build web --release` → serve with any static server
+| Symbol | Type | File | Role |
+|--------|------|------|------|
+| `CheckInTask` | model | `models/task.dart` | Task config, `copyWith` with sentinel pattern |
+| `CheckInRecord` | model | `models/record.dart` | Check-in event, `date` getter normalizes to midnight |
+| `StorageService` | service | `services/storage_service.dart` | All Hive CRUD, streak/stats calculations |
+| `tasksProvider` | AsyncNotifier | `providers/app_providers.dart` | Task CRUD, cross-invalidates `todayRecordsProvider` |
+| `todayRecordsProvider` | AsyncNotifier | `providers/app_providers.dart` | Today's records, check-in/undo operations |
+| `todayTasksProvider` | derived Provider | `providers/app_providers.dart` | Filters tasks by `shouldCheckIn(DateTime.now())` |
+| `streakProvider` | FutureProvider.family | `providers/app_providers.dart` | Per-task streak count |
+| `CheckInApp` | widget | `app.dart` | Theme builder (coral `#FF6B6B` + teal `#4ECDC4`) |
+| `_AppShell` | widget | `app.dart` | Bottom nav with `AnimatedSwitcher` |
+| `TaskCard` | widget | `widgets/task_card.dart` | Card + animated check-in button |
+| `WeeklyChart` | widget | `widgets/weekly_chart.dart` | fl_chart BarChart, dynamic weekday labels |
+| `HeatmapCalendar` | widget | `widgets/heatmap_calendar.dart` | Monthly grid, `GridView.builder` |
+| `_TaskForm` | widget | `pages/settings_page.dart` | Bottom sheet: name, emoji, weekday, time picker |
 
-## File Ownership
+## CONVENTIONS
 
-| Directory | Purpose |
-|---|---|
-| `lib/models/` | Data models (task, record) |
-| `lib/services/` | Storage layer (Hive CRUD + stats) |
-| `lib/providers/` | Riverpod state management |
-| `lib/pages/` | 3 tab pages (home, stats, settings) |
-| `lib/widgets/` | Reusable UI components (task_card, charts, heatmap) |
-| `lib/app.dart` | Theme + navigation shell |
-| `lib/main.dart` | Entry point (Hive + intl init) |
+- **Map-based Hive serialization** — `toMap()` / `fromMap()` on models, no code generation, no TypeAdapters
+- **Equality by `id`** — Both models override `==` / `hashCode` using `id` field
+- **Sentinel `copyWith`** — `CheckInTask.copyWith()` uses `Object? _sentinel` to allow clearing nullable fields (`startMinutes`, `endMinutes`, `reminderMinutes`) back to null. Pass explicitly: `task.copyWith(startMinutes: null)` clears it; omit param keeps old value
+- **Defensive list copy** — `_selectedDays.toList()` when passing mutable lists from UI to storage
+- **Provider self-invalidation** — `ref.invalidateSelf()` after all mutations; cross-invalidate `todayRecordsProvider` when tasks are deleted
+- **Theme-derived colors** — Read `Theme.of(context).colorScheme.primary` in widgets, don't hardcode hex values
+- **fl_chart 0.69.x API** — `tooltipRoundedRadius` (not `tooltipBorderRadius`), `SideTitleWidget(axisSide: meta.axisSide, child:)` (not `meta:`)
 
-## Known Limitations
+## ANTI-PATTERNS (DO NOT)
 
-- `DateTime.now()` in providers won't auto-refresh at midnight
-- Storage does O(n) full-table scans on each query (fine for <1000 records)
-- No data export/import yet
-- No push notification reminders yet
+- **DO NOT** add `hive_generator` / `build_runner` — incompatible with Dart 3.10
+- **DO NOT** use `as any`, `@ts-ignore` equivalents — suppress no type errors in Dart
+- **DO NOT** hardcode weekday labels in charts — use `DateTime.weekday` dynamically (was a bug, fixed)
+- **DO NOT** use `Colors.grey[200]!` — use `Colors.grey.shade200` instead
+- **DO NOT** use `??` for nullable fields in `copyWith` — use the sentinel pattern
+- **DO NOT** add ios/ or macos/ platforms — intentionally removed, web + android only
+
+## PLATFORM GOTCHAS
+
+- Android SDK **36** required (Flutter 3.38 enforces this, not 34)
+- Gradle needs proxy in `~/.gradle/gradle.properties` (`systemProp.https.proxyHost/Port`)
+- First Gradle build auto-installs NDK 28, Build-Tools 35, Platform 35, CMake (~3.5 GB extra)
+- `Hive.initFlutter()` works on both web (IndexedDB) and Android (file system)
+- `intl` Chinese locale requires `await initializeDateFormatting('zh_CN')` in `main()` before any `DateFormat` call
+- Web: `flutter build web --release` produces static files, serve with any HTTP server
+
+## COMMANDS
+
+```bash
+flutter pub get                    # Install dependencies
+flutter analyze                    # Lint (0 issues expected)
+flutter build web --release        # Web build → build/web/
+flutter build apk --release --target-platform android-arm64  # ARM64 APK → build/app/outputs/flutter-apk/
+npx serve build/web -l 8080        # Quick web preview
+adb install build/app/outputs/flutter-apk/app-release.apk    # Install to device
+```
+
+## KNOWN LIMITATIONS
+
+- `DateTime.now()` captured in provider `build()` — stale after midnight, no auto-refresh
+- Storage O(n) full scans — acceptable for <1000 records
+- No data export/import
+- No push notification reminders
+- `CardThemeData` (not `CardTheme`) required in Flutter 3.38
