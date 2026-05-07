@@ -1,4 +1,8 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:hive/hive.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:uuid/uuid.dart';
 
 import '../models/task.dart';
@@ -153,6 +157,87 @@ class StorageService {
       }
     }
     return result;
+  }
+
+  // ─── 导入导出 ────────────────────────────────
+
+  /// 导出所有数据为 JSON 字符串
+  Future<String> exportData() async {
+    final tasks = await getAllTasks();
+    final records = await getAllRecords();
+    final data = {
+      'version': 1,
+      'app': 'check_in_memo',
+      'exportedAt': DateTime.now().toUtc().toIso8601String(),
+      'tasks': tasks.map((t) => t.toMap()).toList(),
+      'records': records.map((r) => r.toMap()).toList(),
+    };
+    return const JsonEncoder.withIndent('  ').convert(data);
+  }
+
+  /// 导出为临时文件，返回文件路径
+  Future<File> exportToFile() async {
+    final json = await exportData();
+    final dir = await getTemporaryDirectory();
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final file = File('${dir.path}/check_in_memo_$timestamp.json');
+    await file.writeAsString(json);
+    return file;
+  }
+
+  /// 导入数据（合并模式：跳过已存在的 task/record）
+  /// 返回 (导入任务数, 导入记录数, 跳过任务数, 跳过记录数)
+  Future<(int, int, int, int)> importData(String json) async {
+    final data = jsonDecode(json) as Map<String, dynamic>;
+
+    if (data['app'] != 'check_in_memo') {
+      throw const FormatException('不是有效的打卡记录导出文件');
+    }
+
+    final version = data['version'] as int? ?? 0;
+    if (version != 1) {
+      throw FormatException('不支持的导出文件版本: $version');
+    }
+
+    final importedTasks = data['tasks'] as List? ?? [];
+    final importedRecords = data['records'] as List? ?? [];
+
+    // 加载现有数据用于去重
+    final tasksBox = await Hive.openBox(_tasksBox);
+    final recordsBox = await Hive.openBox(_recordsBox);
+    final existingTaskIds = tasksBox.keys.toSet();
+    final existingRecordIds = recordsBox.keys.toSet();
+
+    int taskImported = 0;
+    int taskSkipped = 0;
+    int recordImported = 0;
+    int recordSkipped = 0;
+
+    // 导入任务（按 id 去重）
+    for (final raw in importedTasks) {
+      final map = Map<String, dynamic>.from(raw as Map);
+      final id = map['id'] as String;
+      if (existingTaskIds.contains(id)) {
+        taskSkipped++;
+      } else {
+        await tasksBox.put(id, map);
+        taskImported++;
+      }
+    }
+
+    // 导入记录（按 id 去重）
+    for (final raw in importedRecords) {
+      final map = Map<String, dynamic>.from(raw as Map);
+      final id = map['id'] as String;
+      if (existingRecordIds.contains(id)) {
+        recordSkipped++;
+      } else {
+        await recordsBox.put(id, map);
+        recordImported++;
+      }
+    }
+
+    return (taskImported, recordImported, taskSkipped, recordSkipped);
   }
 
   /// 获取最近7天每天的打卡次数
