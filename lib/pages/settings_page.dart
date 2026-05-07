@@ -1,8 +1,13 @@
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../models/task.dart';
 import '../providers/app_providers.dart';
+import '../services/storage_service.dart';
 
 class SettingsPage extends ConsumerWidget {
   const SettingsPage({super.key});
@@ -77,6 +82,35 @@ class SettingsPage extends ConsumerWidget {
                       onEdit: () => _showTaskDialog(context, ref, task: task),
                       onDelete: () => _confirmDelete(context, ref, task),
                     )),
+
+              // 数据管理
+              const SizedBox(height: 24),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                child: Text(
+                  '数据管理',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.7),
+                      ),
+                ),
+              ),
+              ListTile(
+                leading: Icon(Icons.upload_file_rounded,
+                    color: Theme.of(context).colorScheme.primary),
+                title: const Text('导出数据', style: TextStyle(fontWeight: FontWeight.w600)),
+                subtitle: const Text('导出任务配置和打卡记录，便于分享或迁移'),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => _export(context),
+              ),
+              ListTile(
+                leading: Icon(Icons.file_download_outlined,
+                    color: Theme.of(context).colorScheme.primary),
+                title: const Text('导入数据', style: TextStyle(fontWeight: FontWeight.w600)),
+                subtitle: const Text('从文件导入，已有数据会保留（合并模式）'),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => _import(context, ref),
+              ),
             ],
           );
         },
@@ -112,6 +146,112 @@ class SettingsPage extends ConsumerWidget {
         ],
       ),
     );
+  }
+
+  Future<void> _export(BuildContext context) async {
+    try {
+      final storage = StorageService();
+      final file = await storage.exportToFile();
+
+      if (context.mounted) {
+        if (Platform.isAndroid) {
+          await Share.shareXFiles(
+            [XFile(file.path)],
+            text: '打卡记录导出',
+          );
+        } else {
+          // Web / 其他平台：分享 JSON 文本
+          final json = await file.readAsString();
+          await Share.share(json);
+        }
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('导出失败: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _import(BuildContext context, WidgetRef ref) async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['json'],
+      );
+      if (result == null) return;
+
+      final file = result.files.first;
+      if (file.path == null) {
+        // Web 平台走 bytes
+        final bytes = file.bytes;
+        if (bytes == null) return;
+        final content = String.fromCharCodes(bytes);
+        await _doImport(context, ref, content);
+      } else {
+        final content = await File(file.path!).readAsString();
+        await _doImport(context, ref, content);
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('导入失败: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _doImport(
+      BuildContext context, WidgetRef ref, String json) async {
+    // 先预览导入数量
+    final storage = StorageService();
+    final (taskImported, recordImported, taskSkipped, recordSkipped) =
+        await storage.importData(json);
+
+    // 刷新 providers
+    ref.invalidate(tasksProvider);
+    ref.invalidate(todayRecordsProvider);
+
+    if (context.mounted) {
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('导入完成'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('✅ 导入任务: $taskImported 个'),
+              Text('✅ 导入记录: $recordImported 条'),
+              if (taskSkipped > 0 || recordSkipped > 0) ...[
+                const SizedBox(height: 8),
+                Text('⏭ 跳过任务: $taskSkipped 个（已存在）',
+                    style: TextStyle(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurface
+                            .withValues(alpha: 0.5))),
+                Text('⏭ 跳过记录: $recordSkipped 条（已存在）',
+                    style: TextStyle(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurface
+                            .withValues(alpha: 0.5))),
+              ],
+            ],
+          ),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('好的'),
+            ),
+          ],
+        ),
+      );
+    }
   }
 
   void _showTaskDialog(BuildContext context, WidgetRef ref, {CheckInTask? task}) {
