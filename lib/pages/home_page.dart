@@ -115,6 +115,10 @@ class HomePage extends ConsumerWidget {
                       task: task,
                       checkedIn: checkedIn,
                       colorIndex: index,
+                      cycleDays: task.cycleDays,
+                      cycleProgress: ref
+                          .watch(cycleProgressProvider(task.id))
+                          .valueOrNull,
                       onCheckIn: () async {
                         await ref.read(todayRecordsProvider.notifier).checkIn(task.id);
                         if (context.mounted) {

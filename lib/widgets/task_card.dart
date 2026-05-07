@@ -25,6 +25,8 @@ class TaskCard extends StatelessWidget {
   final VoidCallback onCheckIn;
   final VoidCallback? onLongPress;
   final int colorIndex;
+  final (int, int, DateTime, DateTime)? cycleProgress; // (completed, remaining, periodStart, periodEnd)
+  final int cycleDays;
 
   const TaskCard({
     super.key,
@@ -33,6 +35,8 @@ class TaskCard extends StatelessWidget {
     required this.onCheckIn,
     this.onLongPress,
     this.colorIndex = 0,
+    this.cycleProgress,
+    this.cycleDays = 1,
   });
 
   @override
@@ -113,6 +117,60 @@ class TaskCard extends StatelessWidget {
                         ),
                       ],
                     ),
+                    if (cycleProgress != null &&
+                        (cycleDays > 1 || task.cycleTarget > 1)) ...[
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.refresh_rounded,
+                            size: 14,
+                            color: theme.colorScheme.onSurface
+                                .withValues(alpha: 0.4),
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            '本周期 ${cycleProgress!.$1}/${task.cycleTarget}次',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurface
+                                  .withValues(alpha: 0.5),
+                            ),
+                          ),
+                          if (cycleDays > 1) ...[
+                            const Spacer(),
+                            Builder(builder: (context) {
+                              final remainingDays = cycleProgress!.$4
+                                      .difference(DateTime.now())
+                                      .inDays +
+                                  1;
+                              if (remainingDays > 0) {
+                                return Text(
+                                  '剩余$remainingDays天',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: theme.colorScheme.onSurface
+                                        .withValues(alpha: 0.4),
+                                  ),
+                                );
+                              }
+                              return const SizedBox.shrink();
+                            }),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(2),
+                        child: LinearProgressIndicator(
+                          value: (cycleProgress!.$1 / task.cycleTarget)
+                              .clamp(0.0, 1.0),
+                          minHeight: 4,
+                          backgroundColor:
+                              color.withValues(alpha: 0.12),
+                          valueColor:
+                              AlwaysStoppedAnimation<Color>(color),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),

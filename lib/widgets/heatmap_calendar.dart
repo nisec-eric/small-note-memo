@@ -62,15 +62,34 @@ class HeatmapCalendar extends StatelessWidget {
                 color: color,
                 borderRadius: BorderRadius.circular(6),
               ),
-              child: Center(
-                child: Text(
-                  '$dayOffset',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: count > 0 ? FontWeight.w600 : FontWeight.normal,
-                    color: count > 0 ? Colors.white : theme.colorScheme.onSurface.withValues(alpha: 0.35),
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  // Day number at top-left
+                  Positioned(
+                    top: 2,
+                    left: 3,
+                    child: Text(
+                      '$dayOffset',
+                      style: TextStyle(
+                        fontSize: 9,
+                        color: count > 0
+                            ? Colors.white.withValues(alpha: 0.7)
+                            : theme.colorScheme.onSurface.withValues(alpha: 0.35),
+                      ),
+                    ),
                   ),
-                ),
+                  // Count in center (only if count > 0)
+                  if (count > 0)
+                    Text(
+                      '$count',
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
+                ],
               ),
             );
           },
