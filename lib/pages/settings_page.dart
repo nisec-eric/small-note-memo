@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
@@ -149,18 +150,23 @@ class SettingsPage extends ConsumerWidget {
   }
 
   Future<void> _export(BuildContext context) async {
+    final includeRecords = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => _ExportDialog(),
+    );
+    if (includeRecords == null) return;
+
     try {
       final storage = StorageService();
-      final file = await storage.exportToFile();
+      final file = await storage.exportToFile(includeRecords: includeRecords);
 
       if (context.mounted) {
         if (Platform.isAndroid) {
           await Share.shareXFiles(
             [XFile(file.path)],
-            text: '打卡记录导出',
+            text: includeRecords ? '打卡记录导出（含打卡日志）' : '打卡记录导出（仅任务配置）',
           );
         } else {
-          // Web / 其他平台：分享 JSON 文本
           final json = await file.readAsString();
           await Share.share(json);
         }
@@ -183,16 +189,22 @@ class SettingsPage extends ConsumerWidget {
       if (result == null) return;
 
       final file = result.files.first;
+      String content;
       if (file.path == null) {
-        // Web 平台走 bytes
         final bytes = file.bytes;
         if (bytes == null) return;
-        final content = String.fromCharCodes(bytes);
-        await _doImport(context, ref, content);
+        content = String.fromCharCodes(bytes);
       } else {
-        final content = await File(file.path!).readAsString();
-        await _doImport(context, ref, content);
+        content = await File(file.path!).readAsString();
       }
+
+      final includeRecords = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => _ImportDialog(content: content),
+      );
+      if (includeRecords == null) return;
+
+      await _doImport(context, ref, content, includeRecords: includeRecords);
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -203,11 +215,10 @@ class SettingsPage extends ConsumerWidget {
   }
 
   Future<void> _doImport(
-      BuildContext context, WidgetRef ref, String json) async {
-    // 先预览导入数量
+      BuildContext context, WidgetRef ref, String json, {bool includeRecords = true}) async {
     final storage = StorageService();
     final (taskImported, recordImported, taskSkipped, recordSkipped) =
-        await storage.importData(json);
+        await storage.importData(json, includeRecords: includeRecords);
 
     // 刷新 providers
     ref.invalidate(tasksProvider);
@@ -223,21 +234,29 @@ class SettingsPage extends ConsumerWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('✅ 导入任务: $taskImported 个'),
-              Text('✅ 导入记录: $recordImported 条'),
-              if (taskSkipped > 0 || recordSkipped > 0) ...[
+              if (includeRecords) ...[
+                Text('✅ 导入记录: $recordImported 条'),
+              ] else ...[
+                Text('ℹ️ 仅导入任务配置（不含打卡日志）',
+                    style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.5))),
+              ],
+              if (taskSkipped > 0 || (includeRecords && recordSkipped > 0)) ...[
                 const SizedBox(height: 8),
-                Text('⏭ 跳过任务: $taskSkipped 个（已存在）',
-                    style: TextStyle(
-                        color: Theme.of(context)
-                            .colorScheme
-                            .onSurface
-                            .withValues(alpha: 0.5))),
-                Text('⏭ 跳过记录: $recordSkipped 条（已存在）',
-                    style: TextStyle(
-                        color: Theme.of(context)
-                            .colorScheme
-                            .onSurface
-                            .withValues(alpha: 0.5))),
+                if (taskSkipped > 0)
+                  Text('⏭ 跳过任务: $taskSkipped 个（已存在）',
+                      style: TextStyle(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurface
+                              .withValues(alpha: 0.5))),
+                if (includeRecords && recordSkipped > 0)
+                  Text('⏭ 跳过记录: $recordSkipped 条（已存在）',
+                      style: TextStyle(
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurface
+                              .withValues(alpha: 0.5))),
               ],
             ],
           ),
@@ -282,7 +301,7 @@ class _TaskListTile extends StatelessWidget {
     return ListTile(
       leading: Text(task.icon, style: const TextStyle(fontSize: 26)),
       title: Text(task.name, style: const TextStyle(fontWeight: FontWeight.w600)),
-      subtitle: Text('${task.repeatText}  ·  ${task.timeWindowText}'),
+      subtitle: Text('${task.repeatText}  ·  ${task.timeWindowText}${task.cycleDays > 1 ? '  ·  ${task.cycleTarget}/${task.cycleDays}天' : ''}'),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -316,6 +335,8 @@ class _TaskFormState extends ConsumerState<_TaskForm> {
   final _selectedDays = <int>[];
   TimeOfDay? _startTime;
   TimeOfDay? _endTime;
+  int _cycleDays = 1;
+  int _cycleTarget = 1;
 
   static const _emojiOptions = [
     '⭐', '☀️', '📖', '🏃', '💪', '🎯', '📝', '🎵',
@@ -332,6 +353,8 @@ class _TaskFormState extends ConsumerState<_TaskForm> {
     _icon = t?.icon ?? _defaultIcon;
     if (t != null) {
       _selectedDays.addAll(t.repeatDays);
+      _cycleDays = t.cycleDays;
+      _cycleTarget = t.cycleTarget;
       if (t.startMinutes != null) {
         _startTime = TimeOfDay(hour: t.startMinutes! ~/ 60, minute: t.startMinutes! % 60);
       }
@@ -520,6 +543,50 @@ class _TaskFormState extends ConsumerState<_TaskForm> {
             ),
             const SizedBox(height: 28),
 
+            // 统计周期
+            Text('统计周期', style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
+            )),
+            const SizedBox(height: 8),
+            // 目标次数
+            _buildStepper(
+              label: '目标次数',
+              value: _cycleTarget,
+              onChanged: (v) => setState(() => _cycleTarget = v),
+              min: 1,
+              max: 30,
+            ),
+            const SizedBox(height: 8),
+            // 周期天数
+            _buildStepper(
+              label: '周期天数',
+              value: _cycleDays,
+              onChanged: (v) => setState(() => _cycleDays = v),
+              min: 1,
+              max: 30,
+            ),
+            if (_cycleDays == 1 && _cycleTarget == 1)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  '每天打卡模式',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.35),
+                  ),
+                ),
+              )
+            else if (_cycleTarget > _cycleDays)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  '目标不能大于周期',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+                ),
+              ),
+            const SizedBox(height: 28),
+
             // 保存按钮
             SizedBox(
               width: double.infinity,
@@ -539,6 +606,53 @@ class _TaskFormState extends ConsumerState<_TaskForm> {
     );
   }
 
+  Widget _buildStepper({
+    required String label,
+    required int value,
+    required ValueChanged<int> onChanged,
+    required int min,
+    required int max,
+  }) {
+    return Row(
+      children: [
+        SizedBox(
+          width: 72,
+          child: Text(label, style: TextStyle(
+            fontSize: 13,
+            color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
+          )),
+        ),
+        IconButton(
+          onPressed: value > min ? () => onChanged(value - 1) : null,
+          icon: Icon(Icons.remove_circle_outline, size: 28,
+            color: value > min
+                ? Theme.of(context).colorScheme.primary
+                : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.15),
+          ),
+          visualDensity: VisualDensity.compact,
+        ),
+        SizedBox(
+          width: 36,
+          child: Center(
+            child: Text('$value', style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+            )),
+          ),
+        ),
+        IconButton(
+          onPressed: value < max ? () => onChanged(value + 1) : null,
+          icon: Icon(Icons.add_circle_outline, size: 28,
+            color: value < max
+                ? Theme.of(context).colorScheme.primary
+                : Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.15),
+          ),
+          visualDensity: VisualDensity.compact,
+        ),
+      ],
+    );
+  }
+
   void _save() {
     final name = _nameCtrl.text.trim();
     if (name.isEmpty) return;
@@ -553,6 +667,8 @@ class _TaskFormState extends ConsumerState<_TaskForm> {
         repeatDays: _selectedDays.toList(),
         startMinutes: startMinutes,
         endMinutes: endMinutes,
+        cycleDays: _cycleDays,
+        cycleTarget: _cycleTarget,
       );
       ref.read(tasksProvider.notifier).updateTask(updated);
     } else {
@@ -562,8 +678,122 @@ class _TaskFormState extends ConsumerState<_TaskForm> {
         repeatDays: _selectedDays.toList(),
         startMinutes: startMinutes,
         endMinutes: endMinutes,
+        cycleDays: _cycleDays,
+        cycleTarget: _cycleTarget,
       );
     }
     Navigator.pop(context);
+  }
+}
+
+class _ExportDialog extends StatefulWidget {
+  @override
+  State<_ExportDialog> createState() => _ExportDialogState();
+}
+
+class _ExportDialogState extends State<_ExportDialog> {
+  bool _includeRecords = true;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('导出数据'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('选择导出内容：'),
+          const SizedBox(height: 16),
+          CheckboxListTile(
+            value: true,
+            onChanged: null,
+            title: const Text('任务配置'),
+            subtitle: const Text('打卡任务的名称、图标、周期等设置'),
+            controlAffinity: ListTileControlAffinity.leading,
+            contentPadding: EdgeInsets.zero,
+          ),
+          CheckboxListTile(
+            value: _includeRecords,
+            onChanged: (v) => setState(() => _includeRecords = v ?? true),
+            title: const Text('打卡日志'),
+            subtitle: Text(
+              _includeRecords ? '包含所有打卡记录' : '仅导出任务配置，不含打卡记录',
+              style: TextStyle(
+                color: _includeRecords ? null : Colors.orange.shade700,
+              ),
+            ),
+            controlAffinity: ListTileControlAffinity.leading,
+            contentPadding: EdgeInsets.zero,
+          ),
+        ],
+      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _includeRecords),
+          child: const Text('导出'),
+        ),
+      ],
+    );
+  }
+}
+
+class _ImportDialog extends StatefulWidget {
+  final String content;
+  const _ImportDialog({required this.content});
+
+  @override
+  State<_ImportDialog> createState() => _ImportDialogState();
+}
+
+class _ImportDialogState extends State<_ImportDialog> {
+  bool _includeRecords = true;
+
+  @override
+  Widget build(BuildContext context) {
+    int taskCount = 0;
+    int recordCount = 0;
+    try {
+      final data = jsonDecode(widget.content) as Map<String, dynamic>;
+      taskCount = (data['tasks'] as List?)?.length ?? 0;
+      recordCount = (data['records'] as List?)?.length ?? 0;
+    } catch (_) {}
+
+    return AlertDialog(
+      title: const Text('导入数据'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('文件包含 $taskCount 个任务、$recordCount 条打卡记录'),
+          const SizedBox(height: 16),
+          CheckboxListTile(
+            value: _includeRecords,
+            onChanged: (v) => setState(() => _includeRecords = v ?? true),
+            title: const Text('导入打卡日志'),
+            subtitle: Text(
+              _includeRecords ? '合并所有打卡记录' : '仅导入任务配置',
+            ),
+            controlAffinity: ListTileControlAffinity.leading,
+            contentPadding: EdgeInsets.zero,
+          ),
+        ],
+      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _includeRecords),
+          child: const Text('导入'),
+        ),
+      ],
+    );
   }
 }
