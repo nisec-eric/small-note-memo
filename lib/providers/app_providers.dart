@@ -31,6 +31,8 @@ class TasksNotifier extends AsyncNotifier<List<CheckInTask>> {
     int? endMinutes,
     bool reminderOn = false,
     int? reminderMinutes,
+    int cycleDays = 1,
+    int cycleTarget = 1,
   }) async {
     final storage = ref.read(storageProvider);
     await storage.createTask(
@@ -41,6 +43,8 @@ class TasksNotifier extends AsyncNotifier<List<CheckInTask>> {
       endMinutes: endMinutes,
       reminderOn: reminderOn,
       reminderMinutes: reminderMinutes,
+      cycleDays: cycleDays,
+      cycleTarget: cycleTarget,
     );
     ref.invalidateSelf();
   }
@@ -81,12 +85,30 @@ class TodayRecordsNotifier extends AsyncNotifier<List<CheckInRecord>> {
     final storage = ref.read(storageProvider);
     await storage.checkIn(taskId);
     ref.invalidateSelf();
+    _invalidateStats(taskId);
   }
 
   Future<void> undoCheckIn(String recordId) async {
+    // 先找到对应 taskId 再删除，用于刷新统计
+    final records = state.valueOrNull ?? [];
+    final taskId = records
+        .where((r) => r.id == recordId)
+        .map((r) => r.taskId)
+        .firstOrNull;
+
     final storage = ref.read(storageProvider);
     await storage.undoCheckIn(recordId);
     ref.invalidateSelf();
+    if (taskId != null) _invalidateStats(taskId);
+  }
+
+  void _invalidateStats(String taskId) {
+    ref.invalidate(streakProvider(taskId));
+    ref.invalidate(cycleProgressProvider(taskId));
+    ref.invalidate(cycleHistoryProvider(taskId));
+    ref.invalidate(dailyHistoryProvider(taskId));
+    final now = DateTime.now();
+    ref.invalidate(monthlyStatsProvider((year: now.year, month: now.month)));
   }
 
   /// 判断某任务今天是否已打卡
@@ -135,7 +157,29 @@ final monthlyStatsProvider =
   },
 );
 
-final weeklyCountsProvider = FutureProvider<List<int>>((ref) async {
+final cycleProgressProvider =
+    FutureProvider.family<(int, int, DateTime, DateTime), String>(
+        (ref, taskId) async {
   final storage = ref.read(storageProvider);
-  return storage.getWeeklyCounts();
+  final tasks = ref.read(tasksProvider).valueOrNull ?? [];
+  final task = tasks.where((t) => t.id == taskId).firstOrNull;
+  if (task == null) return (0, 0, DateTime.now(), DateTime.now());
+  return storage.getCycleProgress(taskId, task);
+});
+
+final cycleHistoryProvider =
+    FutureProvider.family<List<(int, DateTime, DateTime, int, bool)>, String>(
+        (ref, taskId) async {
+  final storage = ref.read(storageProvider);
+  final tasks = ref.read(tasksProvider).valueOrNull ?? [];
+  final task = tasks.where((t) => t.id == taskId).firstOrNull;
+  if (task == null) return [];
+  final records = await storage.getRecordsByTask(taskId);
+  return storage.getCycleHistorySync(task, records);
+});
+
+final dailyHistoryProvider =
+    FutureProvider.family<List<DateTime>, String>((ref, taskId) async {
+  final storage = ref.read(storageProvider);
+  return storage.getDailyCheckInDates(taskId);
 });

@@ -33,6 +33,8 @@ class StorageService {
     int? endMinutes,
     bool reminderOn = false,
     int? reminderMinutes,
+    int cycleDays = 1,
+    int cycleTarget = 1,
   }) async {
     final box = await Hive.openBox(_tasksBox);
     final task = CheckInTask(
@@ -44,6 +46,8 @@ class StorageService {
       endMinutes: endMinutes,
       reminderOn: reminderOn,
       reminderMinutes: reminderMinutes,
+      cycleDays: cycleDays,
+      cycleTarget: cycleTarget,
     );
     await box.put(task.id, task.toMap());
     return task;
@@ -123,27 +127,78 @@ class StorageService {
 
   // ─── 统计辅助 ────────────────────────────────
 
+  /// 获取当前周期内的打卡进度 (completed, remaining, periodStart, periodEnd)
+  Future<(int, int, DateTime, DateTime)> getCycleProgress(
+      String taskId, CheckInTask task) async {
+    final records = await getRecordsByTask(taskId);
+    final cycleIndex = task.currentCycleIndex;
+    final (periodStart, periodEnd) = task.cyclePeriod(cycleIndex);
+
+    final checkedDates = <DateTime>{};
+    for (final r in records) {
+      final d = r.date;
+      if (!d.isBefore(periodStart) && !d.isAfter(periodEnd)) {
+        checkedDates.add(d);
+      }
+    }
+
+    final completed = checkedDates.length;
+    var remaining = task.cycleTarget - completed;
+    if (remaining < 0) remaining = 0;
+    return (completed, remaining, periodStart, periodEnd);
+  }
+
   /// 获取某任务的连续打卡天数 (从今天往前数)
   Future<int> getStreak(String taskId, CheckInTask task) async {
+    // 每天1次的简单模式, 保持原有逻辑
+    if (task.cycleDays == 1 && task.cycleTarget == 1) {
+      final records = await getRecordsByTask(taskId);
+      final checkedDates = records.map((r) => r.date).toSet();
+
+      int streak = 0;
+      var day = DateTime.now();
+      day = DateTime(day.year, day.month, day.day);
+
+      for (int i = 0; i < _maxStreakDays; i++) {
+        if (task.shouldCheckIn(day)) {
+          if (checkedDates.contains(day)) {
+            streak++;
+          } else {
+            break;
+          }
+        }
+        day = day.subtract(const Duration(days: 1));
+      }
+      return streak;
+    }
+
+    // 周期模式: 计算连续完成的周期数 (从当前周期往前)
     final records = await getRecordsByTask(taskId);
     final checkedDates = records.map((r) => r.date).toSet();
 
     int streak = 0;
-    var day = DateTime.now();
-    // 去掉时分秒
-    day = DateTime(day.year, day.month, day.day);
+    final currentCycle = task.currentCycleIndex;
 
-    // 最多往前看
-    for (int i = 0; i < _maxStreakDays; i++) {
-      if (task.shouldCheckIn(day)) {
-        if (checkedDates.contains(day)) {
-          streak++;
-        } else {
-          break;
+    for (int i = currentCycle; i >= 0; i--) {
+      final (cycleStart, _) = task.cyclePeriod(i);
+
+      int daysChecked = 0;
+      for (int d = 0; d < task.cycleDays; d++) {
+        final date = cycleStart.add(Duration(days: d));
+        if (checkedDates.contains(date)) {
+          daysChecked++;
         }
       }
-      day = day.subtract(const Duration(days: 1));
+
+      if (daysChecked >= task.cycleTarget) {
+        streak++;
+      } else {
+        // 如果是当前周期, 可能还在进行中 - 不中断连续计数
+        if (i == currentCycle) continue;
+        break;
+      }
     }
+
     return streak;
   }
 
@@ -159,25 +214,64 @@ class StorageService {
     return result;
   }
 
+  /// 获取某任务的所有历史周期记录
+  /// Returns list of (cycleIndex, startDate, endDate, completedCount, isCompleted)
+  List<(int, DateTime, DateTime, int, bool)> getCycleHistorySync(
+    CheckInTask task,
+    List<CheckInRecord> records,
+  ) {
+    final checkedDates = records
+        .where((r) => r.taskId == task.id)
+        .map((r) => r.date)
+        .toSet();
+
+    final currentCycle = task.currentCycleIndex;
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+
+    final result = <(int, DateTime, DateTime, int, bool)>[];
+
+    for (int i = 0; i <= currentCycle; i++) {
+      final (start, end) = task.cyclePeriod(i);
+
+      int daysChecked = 0;
+      for (int d = 0; d < task.cycleDays; d++) {
+        final date = start.add(Duration(days: d));
+        if (checkedDates.contains(date)) {
+          daysChecked++;
+        }
+      }
+
+      // isCompleted: the cycle's end date has passed (or is today)
+      final isCompleted = !end.isAfter(today);
+
+      result.add((i, start, end, daysChecked, isCompleted));
+    }
+
+    // Return in reverse order (newest first)
+    return result.reversed.toList();
+  }
+
   // ─── 导入导出 ────────────────────────────────
 
   /// 导出所有数据为 JSON 字符串
-  Future<String> exportData() async {
+  Future<String> exportData({bool includeRecords = true}) async {
     final tasks = await getAllTasks();
-    final records = await getAllRecords();
     final data = {
       'version': 1,
       'app': 'check_in_memo',
       'exportedAt': DateTime.now().toUtc().toIso8601String(),
       'tasks': tasks.map((t) => t.toMap()).toList(),
-      'records': records.map((r) => r.toMap()).toList(),
+      'records': includeRecords
+          ? (await getAllRecords()).map((r) => r.toMap()).toList()
+          : <Map<String, dynamic>>[],
     };
     return const JsonEncoder.withIndent('  ').convert(data);
   }
 
   /// 导出为临时文件，返回文件路径
-  Future<File> exportToFile() async {
-    final json = await exportData();
+  Future<File> exportToFile({bool includeRecords = true}) async {
+    final json = await exportData(includeRecords: includeRecords);
     final dir = await getTemporaryDirectory();
     final timestamp = DateTime.now().millisecondsSinceEpoch;
     final file = File('${dir.path}/check_in_memo_$timestamp.json');
@@ -187,7 +281,7 @@ class StorageService {
 
   /// 导入数据（合并模式：跳过已存在的 task/record）
   /// 返回 (导入任务数, 导入记录数, 跳过任务数, 跳过记录数)
-  Future<(int, int, int, int)> importData(String json) async {
+  Future<(int, int, int, int)> importData(String json, {bool includeRecords = true}) async {
     final data = jsonDecode(json) as Map<String, dynamic>;
 
     if (data['app'] != 'check_in_memo') {
@@ -200,7 +294,9 @@ class StorageService {
     }
 
     final importedTasks = data['tasks'] as List? ?? [];
-    final importedRecords = data['records'] as List? ?? [];
+    final importedRecords = includeRecords
+        ? (data['records'] as List? ?? [])
+        : <dynamic>[];
 
     // 加载现有数据用于去重
     final tasksBox = await Hive.openBox(_tasksBox);
@@ -257,5 +353,12 @@ class StorageService {
       }
     }
     return counts;
+  }
+
+  /// 获取每日任务的打卡日期列表 (normalized dates, newest first)
+  Future<List<DateTime>> getDailyCheckInDates(String taskId) async {
+    final records = await getRecordsByTask(taskId);
+    return records.map((r) => r.date).toSet().toList()
+      ..sort((a, b) => b.compareTo(a));
   }
 }
