@@ -42,8 +42,8 @@ lib/
 | Symbol | Type | File | Role |
 |--------|------|------|------|
 | `CheckInTask` | model | `models/task.dart` | Task config with `cycleDays`, `cycleTarget`, `cycleStartDate`; `cyclePeriod()`, `currentCycleIndex`; `copyWith` with sentinel pattern |
-| `CheckInRecord` | model | `models/record.dart` | Check-in event, `date` getter normalizes to midnight |
-| `StorageService` | service | `services/storage_service.dart` | All Hive CRUD, streak/stats calculations, `getCycleProgress`, `getCycleHistorySync`, `getDailyCheckInDates`, `exportData({includeRecords})`, `importData(json, {includeRecords})` |
+| `CheckInRecord` | model | `models/record.dart` | Check-in event, nullable `taskId`/`topic`/`note`, `date` getter normalizes to midnight |
+| `StorageService` | service | `services/storage_service.dart` | All Hive CRUD, streak/stats calculations, cycle/daily history, one-time check-in CRUD, topic aggregation, `exportData({includeRecords})`, `importData(json, {includeRecords})` |
 | `tasksProvider` | AsyncNotifier | `providers/app_providers.dart` | Task CRUD, cross-invalidates `todayRecordsProvider` |
 | `todayRecordsProvider` | AsyncNotifier | `providers/app_providers.dart` | Today's records, check-in/undo operations |
 | `todayTasksProvider` | derived Provider | `providers/app_providers.dart` | Filters tasks by `shouldCheckIn(DateTime.now())` |
@@ -51,10 +51,13 @@ lib/
 | `CheckInApp` | widget | `app.dart` | Theme builder (coral `#FF6B6B` + teal `#4ECDC4`) |
 | `_AppShell` | widget | `app.dart` | Bottom nav with `AnimatedSwitcher` |
 | `TaskCard` | widget | `widgets/task_card.dart` | Card + animated check-in button |
-| `HeatmapCalendar` | widget | `widgets/heatmap_calendar.dart` | Monthly grid, `GridView.builder`, daily counts |
+| `HeatmapCalendar` | widget | `widgets/heatmap_calendar.dart` | Monthly grid with navigation, `onDayTap` callback, today highlight |
 | `cycleProgressProvider` | FutureProvider.family | `providers/app_providers.dart` | Returns (completed, remaining, periodStart, periodEnd) for current cycle |
 | `cycleHistoryProvider` | FutureProvider.family | `providers/app_providers.dart` | Per-task cycle history list |
 | `dailyHistoryProvider` | FutureProvider.family | `providers/app_providers.dart` | Per-task daily check-in date list |
+| `oneTimeRecordsProvider` | FutureProvider | `providers/app_providers.dart` | All one-time check-in records |
+| `pastTopicsProvider` | FutureProvider | `providers/app_providers.dart` | Distinct past topics for autocomplete |
+| `topicsAggregatedProvider` | FutureProvider | `providers/app_providers.dart` | Topics grouped with count and latest date |
 | `_TaskForm` | widget | `pages/settings_page.dart` | Bottom sheet: name, emoji, weekday, time picker, cycleDays/cycleTarget steppers, cycleStartDate auto-set |
 
 ## CONVENTIONS
@@ -68,6 +71,7 @@ lib/
 - **fl_chart 0.69.x API** — `tooltipRoundedRadius` (not `tooltipBorderRadius`), `SideTitleWidget(axisSide: meta.axisSide, child:)` (not `meta:`)
 - **Fixed cycle periods** — Cycles use `cycleStartDate` as anchor, periods are `[start + N*cycleDays, start + (N+1)*cycleDays - 1]`, NOT rolling windows
 - **Backward-compatible defaults** — `cycleDays`/`cycleTarget` default to 1, `cycleStartDate` falls back to `createdAt` when missing from stored data
+- **One-time check-ins** — `CheckInRecord` with `taskId == null` and `topic != null`; regular records have `taskId != null` and `topic == null`
 
 ## ANTI-PATTERNS (DO NOT)
 
