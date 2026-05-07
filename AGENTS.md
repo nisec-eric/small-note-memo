@@ -1,7 +1,7 @@
 # PROJECT KNOWLEDGE BASE
 
-**Updated:** 2026-05-06
-**Commit:** 9d326c0
+**Updated:** 2026-05-07
+**Commit:** (pending)
 **Branch:** master
 
 ## OVERVIEW
@@ -19,7 +19,7 @@ lib/
 ├── services/              # Hive CRUD + stats (O(n) scans, fine <1k records)
 ├── providers/             # Riverpod AsyncNotifier pattern
 ├── pages/                 # 3 tabs: home, stats, settings
-└── widgets/               # TaskCard (animated), WeeklyChart, HeatmapCalendar
+└── widgets/               # TaskCard (animated), HeatmapCalendar (with daily counts)
 ```
 
 ## WHERE TO LOOK
@@ -32,17 +32,18 @@ lib/
 | Change theme colors | `lib/app.dart` | `_buildTheme()` in `CheckInApp` |
 | Add a new tab page | `lib/app.dart` → `_pages` list | `_AppShellState` |
 | Modify task card UI | `lib/widgets/task_card.dart` | `TaskCard` + `_CheckInButton` |
-| Fix chart display | `lib/widgets/weekly_chart.dart` | `_WeeklyChartState._dayLabel()` — uses `DateTime.weekday` |
 | Change heatmap colors | `lib/widgets/heatmap_calendar.dart` | `_cellColor()` |
 | Add task form field | `lib/pages/settings_page.dart` | `_TaskFormState._save()` + form widgets |
+| Export/import options | `lib/pages/settings_page.dart` | `_ExportDialog`, `_ImportDialog` |
+| Cycle period config | `lib/pages/settings_page.dart` | `_TaskFormState — cycleDays/cycleTarget steppers |
 
 ## CODE MAP
 
 | Symbol | Type | File | Role |
 |--------|------|------|------|
-| `CheckInTask` | model | `models/task.dart` | Task config, `copyWith` with sentinel pattern |
+| `CheckInTask` | model | `models/task.dart` | Task config with `cycleDays`, `cycleTarget`, `cycleStartDate`; `cyclePeriod()`, `currentCycleIndex`; `copyWith` with sentinel pattern |
 | `CheckInRecord` | model | `models/record.dart` | Check-in event, `date` getter normalizes to midnight |
-| `StorageService` | service | `services/storage_service.dart` | All Hive CRUD, streak/stats calculations |
+| `StorageService` | service | `services/storage_service.dart` | All Hive CRUD, streak/stats calculations, `getCycleProgress`, `getCycleHistorySync`, `getDailyCheckInDates`, `exportData({includeRecords})`, `importData(json, {includeRecords})` |
 | `tasksProvider` | AsyncNotifier | `providers/app_providers.dart` | Task CRUD, cross-invalidates `todayRecordsProvider` |
 | `todayRecordsProvider` | AsyncNotifier | `providers/app_providers.dart` | Today's records, check-in/undo operations |
 | `todayTasksProvider` | derived Provider | `providers/app_providers.dart` | Filters tasks by `shouldCheckIn(DateTime.now())` |
@@ -50,9 +51,11 @@ lib/
 | `CheckInApp` | widget | `app.dart` | Theme builder (coral `#FF6B6B` + teal `#4ECDC4`) |
 | `_AppShell` | widget | `app.dart` | Bottom nav with `AnimatedSwitcher` |
 | `TaskCard` | widget | `widgets/task_card.dart` | Card + animated check-in button |
-| `WeeklyChart` | widget | `widgets/weekly_chart.dart` | fl_chart BarChart, dynamic weekday labels |
-| `HeatmapCalendar` | widget | `widgets/heatmap_calendar.dart` | Monthly grid, `GridView.builder` |
-| `_TaskForm` | widget | `pages/settings_page.dart` | Bottom sheet: name, emoji, weekday, time picker |
+| `HeatmapCalendar` | widget | `widgets/heatmap_calendar.dart` | Monthly grid, `GridView.builder`, daily counts |
+| `cycleProgressProvider` | FutureProvider.family | `providers/app_providers.dart` | Returns (completed, remaining, periodStart, periodEnd) for current cycle |
+| `cycleHistoryProvider` | FutureProvider.family | `providers/app_providers.dart` | Per-task cycle history list |
+| `dailyHistoryProvider` | FutureProvider.family | `providers/app_providers.dart` | Per-task daily check-in date list |
+| `_TaskForm` | widget | `pages/settings_page.dart` | Bottom sheet: name, emoji, weekday, time picker, cycleDays/cycleTarget steppers, cycleStartDate auto-set |
 
 ## CONVENTIONS
 
@@ -63,6 +66,8 @@ lib/
 - **Provider self-invalidation** — `ref.invalidateSelf()` after all mutations; cross-invalidate `todayRecordsProvider` when tasks are deleted
 - **Theme-derived colors** — Read `Theme.of(context).colorScheme.primary` in widgets, don't hardcode hex values
 - **fl_chart 0.69.x API** — `tooltipRoundedRadius` (not `tooltipBorderRadius`), `SideTitleWidget(axisSide: meta.axisSide, child:)` (not `meta:`)
+- **Fixed cycle periods** — Cycles use `cycleStartDate` as anchor, periods are `[start + N*cycleDays, start + (N+1)*cycleDays - 1]`, NOT rolling windows
+- **Backward-compatible defaults** — `cycleDays`/`cycleTarget` default to 1, `cycleStartDate` falls back to `createdAt` when missing from stored data
 
 ## ANTI-PATTERNS (DO NOT)
 
@@ -72,6 +77,7 @@ lib/
 - **DO NOT** use `Colors.grey[200]!` — use `Colors.grey.shade200` instead
 - **DO NOT** use `??` for nullable fields in `copyWith` — use the sentinel pattern
 - **DO NOT** add ios/ or macos/ platforms — intentionally removed, web + android only
+- **DO NOT** use rolling window for cycle calculation — use `task.cyclePeriod(index)` for fixed boundaries
 
 ## PLATFORM GOTCHAS
 
@@ -97,6 +103,6 @@ adb install build/app/outputs/flutter-apk/app-release.apk    # Install to device
 
 - `DateTime.now()` captured in provider `build()` — stale after midnight, no auto-refresh
 - Storage O(n) full scans — acceptable for <1000 records
-- No data export/import
+- Export/import uses JSON format with version stamp; old data auto-migrates with safe defaults
 - No push notification reminders
 - `CardThemeData` (not `CardTheme`) required in Flutter 3.38
