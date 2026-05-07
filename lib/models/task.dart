@@ -8,6 +8,9 @@ class CheckInTask {
   final int? endMinutes; // 时间窗口结束
   final bool reminderOn;
   final int? reminderMinutes; // 提醒时间(一天中的第几分钟)
+  final int cycleDays; // 统计周期天数, 默认1(每天)
+  final int cycleTarget; // 周期内需打卡天数, 默认1
+  final DateTime cycleStartDate; // 周期起始日，默认与 createdAt 相同
   final DateTime createdAt;
 
   CheckInTask({
@@ -19,8 +22,12 @@ class CheckInTask {
     this.endMinutes,
     this.reminderOn = false,
     this.reminderMinutes,
+    this.cycleDays = 1,
+    this.cycleTarget = 1,
+    DateTime? cycleStartDate,
     DateTime? createdAt,
-  }) : createdAt = createdAt ?? DateTime.now();
+  })  : cycleStartDate = cycleStartDate ?? createdAt ?? DateTime.now(),
+        createdAt = createdAt ?? DateTime.now();
 
   /// 判断某天是否需要打卡
   bool shouldCheckIn(DateTime date) {
@@ -35,6 +42,12 @@ class CheckInTask {
     final start = _formatMinutes(startMinutes!);
     final end = _formatMinutes(endMinutes!);
     return '$start - $end';
+  }
+
+  /// 格式化周期规则
+  String get cycleText {
+    if (cycleDays == 1 && cycleTarget == 1) return '每天';
+    return '$cycleTarget/$cycleDays天';
   }
 
   /// 格式化重复规则
@@ -58,6 +71,9 @@ class CheckInTask {
     Object? endMinutes = _sentinel,
     bool? reminderOn,
     Object? reminderMinutes = _sentinel,
+    int? cycleDays,
+    int? cycleTarget,
+    DateTime? cycleStartDate,
   }) {
     return CheckInTask(
       id: id,
@@ -74,6 +90,9 @@ class CheckInTask {
       reminderMinutes: reminderMinutes == _sentinel
           ? this.reminderMinutes
           : reminderMinutes as int?,
+      cycleDays: cycleDays ?? this.cycleDays,
+      cycleTarget: cycleTarget ?? this.cycleTarget,
+      cycleStartDate: cycleStartDate ?? this.cycleStartDate,
       createdAt: createdAt,
     );
   }
@@ -91,6 +110,9 @@ class CheckInTask {
       'endMinutes': endMinutes,
       'reminderOn': reminderOn,
       'reminderMinutes': reminderMinutes,
+      'cycleDays': cycleDays,
+      'cycleTarget': cycleTarget,
+      'cycleStartDate': cycleStartDate.toIso8601String(),
       'createdAt': createdAt.toIso8601String(),
     };
   }
@@ -105,8 +127,35 @@ class CheckInTask {
       endMinutes: map['endMinutes'] as int?,
       reminderOn: map['reminderOn'] as bool? ?? false,
       reminderMinutes: map['reminderMinutes'] as int?,
+      cycleDays: map['cycleDays'] as int? ?? 1,
+      cycleTarget: map['cycleTarget'] as int? ?? 1,
+      cycleStartDate: map['cycleStartDate'] != null
+          ? DateTime.parse(map['cycleStartDate'] as String)
+          : DateTime.parse(map['createdAt'] as String),
       createdAt: DateTime.parse(map['createdAt'] as String),
     );
+  }
+
+  /// 计算第 [cycleIndex] 个周期的起止日期 (0-indexed, 0=first cycle)
+  (DateTime start, DateTime end) cyclePeriod(int cycleIndex) {
+    final start = DateTime(
+      cycleStartDate.year,
+      cycleStartDate.month,
+      cycleStartDate.day,
+    ).add(Duration(days: cycleIndex * cycleDays));
+    final end = start.add(Duration(days: cycleDays - 1));
+    return (start, end);
+  }
+
+  /// 今天属于第几个周期 (0-indexed)
+  int get currentCycleIndex {
+    final start = DateTime(
+        cycleStartDate.year, cycleStartDate.month, cycleStartDate.day);
+    final today = DateTime.now();
+    final todayNormalized = DateTime(today.year, today.month, today.day);
+    final diff = todayNormalized.difference(start).inDays;
+    if (diff < 0) return 0;
+    return diff ~/ cycleDays;
   }
 
   @override
