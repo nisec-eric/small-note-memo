@@ -81,6 +81,58 @@ class StorageService {
       ..sort((a, b) => b.checkedAt.compareTo(a.checkedAt));
   }
 
+  // ─── One-time Check-in ─────────────────────────
+
+  Future<CheckInRecord> oneTimeCheckIn({
+    required String topic,
+    String? note,
+  }) async {
+    final box = await Hive.openBox(_recordsBox);
+    final record = CheckInRecord(
+      id: _uuid.v4(),
+      topic: topic,
+      note: note,
+    );
+    await box.put(record.id, record.toMap());
+    return record;
+  }
+
+  Future<List<CheckInRecord>> getOneTimeRecords() async {
+    final all = await getAllRecords();
+    return all.where((r) => r.taskId == null && r.topic != null).toList()
+      ..sort((a, b) => b.checkedAt.compareTo(a.checkedAt));
+  }
+
+  Future<List<String>> getPastTopics() async {
+    final records = await getOneTimeRecords();
+    final topics = records.map((r) => r.topic!).toSet().toList();
+    topics.sort(); // alphabetical
+    return topics;
+  }
+
+  /// Returns list of (topic, count, latestDate)
+  Future<List<(String, int, DateTime)>> getTopicsAggregated() async {
+    final records = await getOneTimeRecords();
+    final topicMap = <String, (int, DateTime)>{};
+    for (final r in records) {
+      final t = r.topic!;
+      final existing = topicMap[t];
+      if (existing != null) {
+        topicMap[t] = (
+          existing.$1 + 1,
+          r.checkedAt.isAfter(existing.$2) ? r.checkedAt : existing.$2,
+        );
+      } else {
+        topicMap[t] = (1, r.checkedAt);
+      }
+    }
+    final result = topicMap.entries
+        .map((e) => (e.key, e.value.$1, e.value.$2))
+        .toList();
+    result.sort((a, b) => b.$3.compareTo(a.$3)); // sort by latest date
+    return result;
+  }
+
   Future<List<CheckInRecord>> getRecordsByDate(DateTime date) async {
     final all = await getAllRecords();
     return all.where((r) {

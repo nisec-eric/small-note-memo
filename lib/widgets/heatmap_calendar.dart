@@ -1,16 +1,23 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
-/// 月度打卡热力图 (日历样式)
+/// 月度打卡热力图 (日历样式，支持月份切换 + 点击查看详情)
 class HeatmapCalendar extends StatelessWidget {
   final int year;
   final int month;
   final Map<int, int> dailyCounts; // day -> count
+  final VoidCallback? onPreviousMonth;
+  final VoidCallback? onNextMonth;
+  final ValueChanged<int>? onDayTap; // callback with day number
 
   const HeatmapCalendar({
     super.key,
     required this.year,
     required this.month,
     required this.dailyCounts,
+    this.onPreviousMonth,
+    this.onNextMonth,
+    this.onDayTap,
   });
 
   @override
@@ -18,10 +25,40 @@ class HeatmapCalendar extends StatelessWidget {
     final theme = Theme.of(context);
     final daysInMonth = DateTime(year, month + 1, 0).day;
     final firstWeekday = DateTime(year, month, 1).weekday; // 1=Mon..7=Sun
+    final monthLabel = DateFormat('y年M月', 'zh_CN').format(DateTime(year, month));
 
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
+        // 月份导航
+        Row(
+          children: [
+            IconButton(
+              onPressed: onPreviousMonth,
+              icon: const Icon(Icons.chevron_left_rounded, size: 20),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            ),
+            Expanded(
+              child: Center(
+                child: Text(
+                  monthLabel,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
+                  ),
+                ),
+              ),
+            ),
+            IconButton(
+              onPressed: onNextMonth,
+              icon: const Icon(Icons.chevron_right_rounded, size: 20),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
         // 星期标题
         Row(
           children: ['一', '二', '三', '四', '五', '六', '日']
@@ -29,8 +66,8 @@ class HeatmapCalendar extends StatelessWidget {
                     child: Center(
                       child: Text(
                         d,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurface.withValues(alpha: 0.4),
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: theme.colorScheme.onSurface.withValues(alpha: 0.35),
                           fontWeight: FontWeight.w500,
                         ),
                       ),
@@ -38,15 +75,15 @@ class HeatmapCalendar extends StatelessWidget {
                   ))
               .toList(),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 4),
         // 日期格子
         GridView.builder(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: 7,
-            mainAxisSpacing: 4,
-            crossAxisSpacing: 4,
+            mainAxisSpacing: 2,
+            crossAxisSpacing: 2,
           ),
           itemCount: daysInMonth + firstWeekday - 1,
           itemBuilder: (context, index) {
@@ -56,46 +93,41 @@ class HeatmapCalendar extends StatelessWidget {
 
             final count = dailyCounts[dayOffset] ?? 0;
             final color = _cellColor(count, theme);
+            final isToday = _isToday(dayOffset);
 
-            return Container(
-              decoration: BoxDecoration(
-                color: color,
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  // Day number at top-left
-                  Positioned(
-                    top: 2,
-                    left: 3,
-                    child: Text(
-                      '$dayOffset',
-                      style: TextStyle(
-                        fontSize: 9,
-                        color: count > 0
-                            ? Colors.white.withValues(alpha: 0.7)
-                            : theme.colorScheme.onSurface.withValues(alpha: 0.35),
-                      ),
+            return GestureDetector(
+              onTap: onDayTap != null ? () => onDayTap!(dayOffset) : null,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: color,
+                  borderRadius: BorderRadius.circular(4),
+                  border: isToday
+                      ? Border.all(color: theme.colorScheme.primary, width: 1.5)
+                      : null,
+                ),
+                child: Center(
+                  child: Text(
+                    '$dayOffset',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: count > 0 ? FontWeight.w600 : FontWeight.normal,
+                      color: count > 0
+                          ? Colors.white
+                          : theme.colorScheme.onSurface.withValues(alpha: 0.35),
                     ),
                   ),
-                  // Count in center (only if count > 0)
-                  if (count > 0)
-                    Text(
-                      '$count',
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                    ),
-                ],
+                ),
               ),
             );
           },
         ),
       ],
     );
+  }
+
+  bool _isToday(int day) {
+    final now = DateTime.now();
+    return year == now.year && month == now.month && day == now.day;
   }
 
   Color _cellColor(int count, ThemeData theme) {
@@ -106,7 +138,6 @@ class HeatmapCalendar extends StatelessWidget {
     final base = theme.colorScheme.primary;
     if (count == 1) return base.withValues(alpha: 0.35);
     if (count <= 3) return base.withValues(alpha: 0.55);
-    if (count <= 5) return base.withValues(alpha: 0.75);
-    return base;
+    return base.withValues(alpha: 0.75);
   }
 }

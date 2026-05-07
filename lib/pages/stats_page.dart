@@ -1,18 +1,164 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 
 import '../models/task.dart';
 import '../providers/app_providers.dart';
+import '../services/storage_service.dart';
 import '../widgets/heatmap_calendar.dart';
 
-class StatsPage extends ConsumerWidget {
+class StatsPage extends ConsumerStatefulWidget {
   const StatsPage({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<StatsPage> createState() => _StatsPageState();
+}
+
+class _StatsPageState extends ConsumerState<StatsPage> {
+  late int _year;
+  late int _month;
+
+  @override
+  void initState() {
+    super.initState();
+    final now = DateTime.now();
+    _year = now.year;
+    _month = now.month;
+  }
+
+  void _previousMonth() {
+    setState(() {
+      _month--;
+      if (_month < 1) {
+        _month = 12;
+        _year--;
+      }
+    });
+  }
+
+  void _nextMonth() {
+    setState(() {
+      _month++;
+      if (_month > 12) {
+        _month = 1;
+        _year++;
+      }
+    });
+  }
+
+  Future<void> _showDayDetail(int day) async {
+    final date = DateTime(_year, _month, day);
+    final dateStr = DateFormat('M月d日 EEEE', 'zh_CN').format(date);
+    final storage = StorageService();
+
+    // 获取该日所有记录
+    final records = await storage.getRecordsByDate(date);
+    if (!mounted) return;
+
+    // 获取任务信息用于显示
+    final tasks = ref.read(tasksProvider).valueOrNull ?? [];
+
+    // 分离任务打卡和单次打卡
+    final taskRecords = records.where((r) => r.taskId != null).toList();
+    final oneTimeRecords = records.where((r) => r.taskId == null && r.topic != null).toList();
+
+    if (taskRecords.isEmpty && oneTimeRecords.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('$dateStr 无打卡记录'),
+          duration: const Duration(seconds: 1),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(dateStr),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 任务打卡
+            if (taskRecords.isNotEmpty) ...[
+              Text('任务打卡', style: Theme.of(ctx).textTheme.labelMedium?.copyWith(
+                color: Theme.of(ctx).colorScheme.onSurface.withValues(alpha: 0.5),
+              )),
+              const SizedBox(height: 4),
+              ...taskRecords.map((r) {
+                final task = tasks.where((t) => t.id == r.taskId).firstOrNull;
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Row(
+                    children: [
+                      Text(task?.icon ?? '📌', style: const TextStyle(fontSize: 16)),
+                      const SizedBox(width: 6),
+                      Expanded(child: Text(task?.name ?? '未知任务')),
+                    ],
+                  ),
+                );
+              }),
+            ],
+            // 单次打卡
+            if (oneTimeRecords.isNotEmpty) ...[
+              if (taskRecords.isNotEmpty) const SizedBox(height: 12),
+              Text('单次打卡', style: Theme.of(ctx).textTheme.labelMedium?.copyWith(
+                color: Theme.of(ctx).colorScheme.onSurface.withValues(alpha: 0.5),
+              )),
+              const SizedBox(height: 4),
+              ...oneTimeRecords.map((r) {
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.bookmark_outline_rounded, size: 16),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(r.topic!, style: const TextStyle(fontWeight: FontWeight.w500)),
+                          ),
+                        ],
+                      ),
+                      if (r.note != null && r.note!.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 22),
+                          child: Text(
+                            r.note!,
+                            style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                              color: Theme.of(ctx).colorScheme.onSurface.withValues(alpha: 0.5),
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                );
+              }),
+            ],
+          ],
+        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final tasksAsync = ref.watch(tasksProvider);
     final now = DateTime.now();
-    final monthlyStatsAsync = ref.watch(monthlyStatsProvider((year: now.year, month: now.month)));
+    final currentMonthStats = ref.watch(monthlyStatsProvider((year: now.year, month: now.month)));
+    final monthlyStatsAsync = ref.watch(monthlyStatsProvider((year: _year, month: _month)));
 
     return Scaffold(
       appBar: AppBar(
@@ -26,7 +172,7 @@ class StatsPage extends ConsumerWidget {
             // ── 本月概览 ──
             _SectionCard(
               title: '本月概览',
-              child: monthlyStatsAsync.when(
+              child: currentMonthStats.when(
                 loading: () => const SizedBox(height: 60, child: Center(child: CircularProgressIndicator())),
                 error: (e, _) => Text('加载失败: $e'),
                 data: (stats) {
@@ -118,12 +264,15 @@ class StatsPage extends ConsumerWidget {
             _SectionCard(
               title: '月度热力图',
               child: monthlyStatsAsync.when(
-                loading: () => const SizedBox(height: 200, child: Center(child: CircularProgressIndicator())),
+                loading: () => const SizedBox(height: 160, child: Center(child: CircularProgressIndicator())),
                 error: (e, _) => Text('加载失败: $e'),
                 data: (stats) => HeatmapCalendar(
-                  year: now.year,
-                  month: now.month,
+                  year: _year,
+                  month: _month,
                   dailyCounts: stats,
+                  onPreviousMonth: _previousMonth,
+                  onNextMonth: _nextMonth,
+                  onDayTap: _showDayDetail,
                 ),
               ),
             ),
@@ -154,6 +303,37 @@ class StatsPage extends ConsumerWidget {
                   );
                 },
               ),
+            ),
+            const SizedBox(height: 16),
+
+            // ── 单次记录 ──
+            _SectionCard(
+              title: '单次记录',
+              child: ref.watch(topicsAggregatedProvider).when(
+                    loading: () => const SizedBox(
+                        height: 60,
+                        child: Center(child: CircularProgressIndicator())),
+                    error: (e, _) => Text('加载失败: $e'),
+                    data: (topics) {
+                      if (topics.isEmpty) {
+                        return const Padding(
+                          padding: EdgeInsets.all(16),
+                          child: Text('暂无单次记录',
+                              style: TextStyle(color: Colors.grey)),
+                        );
+                      }
+                      return Column(
+                        children: topics.map((item) {
+                          final (topic, count, latestDate) = item;
+                          return _OneTimeTopicRow(
+                            topic: topic,
+                            count: count,
+                            latestDate: latestDate,
+                          );
+                        }).toList(),
+                      );
+                    },
+                  ),
             ),
             const SizedBox(height: 32),
           ],
@@ -481,6 +661,132 @@ class _TaskCycleHistoryState extends ConsumerState<_TaskCycleHistory> {
           ),
         );
       },
+    );
+  }
+}
+
+class _OneTimeTopicRow extends ConsumerStatefulWidget {
+  final String topic;
+  final int count;
+  final DateTime latestDate;
+
+  const _OneTimeTopicRow({
+    required this.topic,
+    required this.count,
+    required this.latestDate,
+  });
+
+  @override
+  ConsumerState<_OneTimeTopicRow> createState() => _OneTimeTopicRowState();
+}
+
+class _OneTimeTopicRowState extends ConsumerState<_OneTimeTopicRow> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final recordsAsync = ref.watch(oneTimeRecordsProvider);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Column(
+        children: [
+          InkWell(
+            onTap: () => setState(() => _expanded = !_expanded),
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Row(
+                children: [
+                  Icon(Icons.bookmark_outline_rounded,
+                      size: 18, color: theme.colorScheme.primary),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      widget.topic,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.primary.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      '${widget.count}次',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Icon(
+                    _expanded
+                        ? Icons.expand_less_rounded
+                        : Icons.expand_more_rounded,
+                    size: 18,
+                    color: theme.colorScheme.onSurface.withValues(alpha: 0.4),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (_expanded)
+            recordsAsync.when(
+              data: (records) {
+                final topicRecords =
+                    records.where((r) => r.topic == widget.topic).toList();
+                return Padding(
+                  padding: const EdgeInsets.only(left: 26),
+                  child: Column(
+                    children: topicRecords.map((r) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        child: Row(
+                          children: [
+                            Text(
+                              '${r.checkedAt.month}/${r.checkedAt.day}',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.onSurface
+                                    .withValues(alpha: 0.5),
+                              ),
+                            ),
+                            if (r.note != null && r.note!.isNotEmpty) ...[
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  r.note!,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: theme.colorScheme.onSurface
+                                        .withValues(alpha: 0.4),
+                                    fontStyle: FontStyle.italic,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                );
+              },
+              loading: () => const SizedBox(
+                  height: 20,
+                  child:
+                      Center(child: CircularProgressIndicator(strokeWidth: 2))),
+              error: (_, _) => const SizedBox.shrink(),
+            ),
+        ],
+      ),
     );
   }
 }

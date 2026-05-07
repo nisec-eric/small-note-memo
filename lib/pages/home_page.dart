@@ -19,6 +19,11 @@ class HomePage extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('打卡记录'),
       ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => _showOneTimeCheckIn(context, ref),
+        icon: const Icon(Icons.edit_note_rounded),
+        label: const Text('单次打卡'),
+      ),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -37,7 +42,8 @@ class HomePage extends ConsumerWidget {
                 todayTasksAsync.when(
                   data: (tasks) => todayRecordsAsync.when(
                     data: (records) {
-                      final done = records.length;
+                      // 只统计关联任务的打卡记录（排除单次打卡）
+                      final taskDone = records.where((r) => r.taskId != null).length;
                       final total = tasks.length;
                       return Container(
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -46,7 +52,7 @@ class HomePage extends ConsumerWidget {
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: Text(
-                          '$done/$total 已完成',
+                          '$taskDone/$total 已完成',
                           style: TextStyle(
                             color: Theme.of(context).colorScheme.primary,
                             fontWeight: FontWeight.w600,
@@ -65,6 +71,49 @@ class HomePage extends ConsumerWidget {
             ),
           ),
           const SizedBox(height: 12),
+          // 今日单次打卡记录
+          todayRecordsAsync.when(
+            data: (records) {
+              final oneTimeRecords = records.where((r) => r.taskId == null && r.topic != null).toList();
+              if (oneTimeRecords.isEmpty) return const SizedBox.shrink();
+              return Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: oneTimeRecords.map((r) {
+                    return Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.tertiary.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: Theme.of(context).colorScheme.tertiary.withValues(alpha: 0.2),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.bookmark_rounded, size: 14, color: Theme.of(context).colorScheme.tertiary),
+                          const SizedBox(width: 4),
+                          Text(
+                            r.topic!,
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: Theme.of(context).colorScheme.tertiary,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }).toList(),
+                ),
+              );
+            },
+            loading: () => const SizedBox.shrink(),
+            error: (_, _) => const SizedBox.shrink(),
+          ),
+          const SizedBox(height: 8),
           // 任务列表
           Expanded(
             child: todayTasksAsync.when(
@@ -153,5 +202,156 @@ class HomePage extends ConsumerWidget {
         ],
       ),
     );
+  }
+
+  void _showOneTimeCheckIn(BuildContext context, WidgetRef ref) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => const _OneTimeCheckInSheet(),
+    );
+  }
+}
+
+class _OneTimeCheckInSheet extends ConsumerStatefulWidget {
+  const _OneTimeCheckInSheet();
+
+  @override
+  ConsumerState<_OneTimeCheckInSheet> createState() => _OneTimeCheckInSheetState();
+}
+
+class _OneTimeCheckInSheetState extends ConsumerState<_OneTimeCheckInSheet> {
+  final _topicCtrl = TextEditingController();
+  final _noteCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _topicCtrl.dispose();
+    _noteCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final topicsAsync = ref.watch(pastTopicsProvider);
+    final theme = Theme.of(context);
+
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 20,
+        right: 20,
+        top: 20,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Handle
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.onSurface.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              '单次打卡',
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 20),
+
+            // Topic field
+            TextField(
+              controller: _topicCtrl,
+              autofocus: true,
+              decoration: InputDecoration(
+                labelText: '打卡主题 *',
+                hintText: '例如：跑步5公里',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              onChanged: (_) => setState(() {}),
+            ),
+
+            // Past topic suggestions
+            const SizedBox(height: 12),
+            topicsAsync.when(
+              data: (topics) {
+                if (topics.isEmpty) return const SizedBox.shrink();
+                return Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: topics.map((t) {
+                    return ActionChip(
+                      label: Text(t),
+                      onPressed: () {
+                        _topicCtrl.text = t;
+                        setState(() {});
+                      },
+                    );
+                  }).toList(),
+                );
+              },
+              loading: () => const SizedBox.shrink(),
+              error: (_, _) => const SizedBox.shrink(),
+            ),
+            const SizedBox(height: 16),
+
+            // Note field
+            TextField(
+              controller: _noteCtrl,
+              decoration: InputDecoration(
+                labelText: '备注（可选）',
+                hintText: '记录一些细节...',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              maxLines: 2,
+            ),
+            const SizedBox(height: 24),
+
+            // Submit button
+            SizedBox(
+              width: double.infinity,
+              height: 50,
+              child: FilledButton(
+                onPressed: _topicCtrl.text.trim().isEmpty ? null : _submit,
+                style: FilledButton.styleFrom(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: const Text('记录', style: TextStyle(fontSize: 16)),
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _submit() {
+    final topic = _topicCtrl.text.trim();
+    if (topic.isEmpty) return;
+    final note = _noteCtrl.text.trim();
+    ref.read(todayRecordsProvider.notifier).oneTimeCheckIn(
+          topic: topic,
+          note: note.isEmpty ? null : note,
+        );
+    Navigator.pop(context);
   }
 }

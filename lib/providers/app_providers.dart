@@ -102,6 +102,17 @@ class TodayRecordsNotifier extends AsyncNotifier<List<CheckInRecord>> {
     if (taskId != null) _invalidateStats(taskId);
   }
 
+  Future<void> oneTimeCheckIn({required String topic, String? note}) async {
+    final storage = ref.read(storageProvider);
+    await storage.oneTimeCheckIn(topic: topic, note: note);
+    ref.invalidateSelf();
+    ref.invalidate(oneTimeRecordsProvider);
+    ref.invalidate(pastTopicsProvider);
+    ref.invalidate(topicsAggregatedProvider);
+    final now = DateTime.now();
+    ref.invalidate(monthlyStatsProvider((year: now.year, month: now.month)));
+  }
+
   void _invalidateStats(String taskId) {
     ref.invalidate(streakProvider(taskId));
     ref.invalidate(cycleProgressProvider(taskId));
@@ -182,4 +193,23 @@ final dailyHistoryProvider =
     FutureProvider.family<List<DateTime>, String>((ref, taskId) async {
   final storage = ref.read(storageProvider);
   return storage.getDailyCheckInDates(taskId);
+});
+
+// ─── One-time Check-in ──────────────────────────
+
+final oneTimeRecordsProvider =
+    FutureProvider<List<CheckInRecord>>((ref) async {
+  final storage = ref.read(storageProvider);
+  return storage.getOneTimeRecords();
+});
+
+final pastTopicsProvider = FutureProvider<List<String>>((ref) async {
+  final storage = ref.read(storageProvider);
+  return storage.getPastTopics();
+});
+
+final topicsAggregatedProvider =
+    FutureProvider<List<(String, int, DateTime)>>((ref) async {
+  final storage = ref.read(storageProvider);
+  return storage.getTopicsAggregated();
 });
