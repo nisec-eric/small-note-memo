@@ -116,18 +116,28 @@ class TodayRecordsNotifier extends AsyncNotifier<List<CheckInRecord>> {
   /// 删除任意打卡记录，自动级联刷新相关 provider
   Future<void> deleteRecord(String recordId) async {
     final storage = ref.read(storageProvider);
-    final taskId = await storage.deleteRecord(recordId);
+    // 先查记录信息用于级联刷新
+    final allRecords = await storage.getAllRecords();
+    final record = allRecords.where((r) => r.id == recordId).firstOrNull;
+    final taskId = record?.taskId;
+    final recordDate = record?.checkedAt;
+
+    await storage.deleteRecord(recordId);
     ref.invalidateSelf();
     // 刷新单次打卡相关
     ref.invalidate(oneTimeRecordsProvider);
     ref.invalidate(pastTopicsProvider);
     ref.invalidate(topicsAggregatedProvider);
-    // 刷新月度统计
+    // 刷新月度统计（记录所在月 + 当前月）
+    if (recordDate != null) {
+      ref.invalidate(monthlyStatsProvider((year: recordDate.year, month: recordDate.month)));
+    }
     final now = DateTime.now();
     ref.invalidate(monthlyStatsProvider((year: now.year, month: now.month)));
     // 如果关联了任务，刷新任务相关统计
     if (taskId != null) {
       _invalidateStats(taskId);
+      ref.invalidate(taskRecordsProvider(taskId));
     }
   }
 
