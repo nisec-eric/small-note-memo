@@ -398,25 +398,6 @@ class StorageService {
     return (taskImported, recordImported, taskSkipped, recordSkipped);
   }
 
-  /// 获取最近7天每天的打卡次数
-  Future<List<int>> getWeeklyCounts() async {
-    final all = await getAllRecords();
-    final now = DateTime.now();
-    final counts = List.filled(7, 0);
-
-    for (int i = 6; i >= 0; i--) {
-      final day = DateTime(now.year, now.month, now.day).subtract(Duration(days: i));
-      for (final r in all) {
-        if (r.checkedAt.year == day.year &&
-            r.checkedAt.month == day.month &&
-            r.checkedAt.day == day.day) {
-          counts[6 - i]++;
-        }
-      }
-    }
-    return counts;
-  }
-
   /// 获取每日任务的打卡日期列表 (normalized dates, newest first)
   Future<List<DateTime>> getDailyCheckInDates(String taskId) async {
     final records = await getRecordsByTask(taskId);
