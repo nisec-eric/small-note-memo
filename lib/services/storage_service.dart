@@ -171,6 +171,16 @@ class StorageService {
     await box.delete(recordId);
   }
 
+  /// 删除任意打卡记录，返回其 taskId（可能为 null）
+  Future<String?> deleteRecord(String recordId) async {
+    final box = await Hive.openBox(_recordsBox);
+    final data = box.get(recordId);
+    if (data == null) return null;
+    final taskId = data['taskId'] as String?;
+    await box.delete(recordId);
+    return taskId;
+  }
+
   Future<void> deleteRecordsByTask(String taskId) async {
     final box = await Hive.openBox(_recordsBox);
     final records = await getRecordsByTask(taskId);

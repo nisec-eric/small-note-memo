@@ -82,28 +82,33 @@ class HomePage extends ConsumerWidget {
                   spacing: 6,
                   runSpacing: 6,
                   children: oneTimeRecords.map((r) {
-                    return Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.tertiary.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(
-                          color: Theme.of(context).colorScheme.tertiary.withValues(alpha: 0.2),
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.bookmark_rounded, size: 14, color: Theme.of(context).colorScheme.tertiary),
-                          const SizedBox(width: 4),
-                          Text(
-                            r.topic!,
-                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: Theme.of(context).colorScheme.tertiary,
-                              fontWeight: FontWeight.w600,
-                            ),
+                    return InkWell(
+                      onTap: () {},
+                      onLongPress: () => _confirmDeleteRecord(context, ref, r.id, r.topic!),
+                      borderRadius: BorderRadius.circular(8),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.tertiary.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: Theme.of(context).colorScheme.tertiary.withValues(alpha: 0.2),
                           ),
-                        ],
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.bookmark_rounded, size: 14, color: Theme.of(context).colorScheme.tertiary),
+                            const SizedBox(width: 4),
+                            Text(
+                              r.topic!,
+                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: Theme.of(context).colorScheme.tertiary,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     );
                   }).toList(),
@@ -184,15 +189,15 @@ class HomePage extends ConsumerWidget {
                         }
                       },
                       onLongPress: checkedIn
-                          ? () {
-                              final recordId = ref
-                                  .read(todayRecordsProvider.notifier)
-                                  .getTodayRecordId(task.id);
-                              if (recordId != null) {
-                                ref.read(todayRecordsProvider.notifier).undoCheckIn(recordId);
-                              }
-                            }
-                          : null,
+                           ? () {
+                               final recordId = ref
+                                   .read(todayRecordsProvider.notifier)
+                                   .getTodayRecordId(task.id);
+                               if (recordId != null) {
+                                 _confirmDeleteRecord(context, ref, recordId, '${task.icon} ${task.name}');
+                               }
+                             }
+                           : null,
                     );
                   },
                 );
@@ -212,6 +217,30 @@ class HomePage extends ConsumerWidget {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (ctx) => const _OneTimeCheckInSheet(),
+    );
+  }
+
+  void _confirmDeleteRecord(BuildContext context, WidgetRef ref, String recordId, String label) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('删除记录'),
+        content: Text('确定删除「$label」的打卡记录？'),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              ref.read(todayRecordsProvider.notifier).deleteRecord(recordId);
+            },
+            child: Text('删除', style: TextStyle(color: Theme.of(ctx).colorScheme.error)),
+          ),
+        ],
+      ),
     );
   }
 }

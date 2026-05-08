@@ -113,6 +113,24 @@ class TodayRecordsNotifier extends AsyncNotifier<List<CheckInRecord>> {
     ref.invalidate(monthlyStatsProvider((year: now.year, month: now.month)));
   }
 
+  /// 删除任意打卡记录，自动级联刷新相关 provider
+  Future<void> deleteRecord(String recordId) async {
+    final storage = ref.read(storageProvider);
+    final taskId = await storage.deleteRecord(recordId);
+    ref.invalidateSelf();
+    // 刷新单次打卡相关
+    ref.invalidate(oneTimeRecordsProvider);
+    ref.invalidate(pastTopicsProvider);
+    ref.invalidate(topicsAggregatedProvider);
+    // 刷新月度统计
+    final now = DateTime.now();
+    ref.invalidate(monthlyStatsProvider((year: now.year, month: now.month)));
+    // 如果关联了任务，刷新任务相关统计
+    if (taskId != null) {
+      _invalidateStats(taskId);
+    }
+  }
+
   void _invalidateStats(String taskId) {
     ref.invalidate(streakProvider(taskId));
     ref.invalidate(cycleProgressProvider(taskId));
@@ -193,6 +211,13 @@ final dailyHistoryProvider =
     FutureProvider.family<List<DateTime>, String>((ref, taskId) async {
   final storage = ref.read(storageProvider);
   return storage.getDailyCheckInDates(taskId);
+});
+
+/// 获取某任务所有打卡记录（含 ID，用于删除）
+final taskRecordsProvider =
+    FutureProvider.family<List<CheckInRecord>, String>((ref, taskId) async {
+  final storage = ref.read(storageProvider);
+  return storage.getRecordsByTask(taskId);
 });
 
 // ─── One-time Check-in ──────────────────────────

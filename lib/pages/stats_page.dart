@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../models/task.dart';
+import '../models/record.dart';
 import '../providers/app_providers.dart';
 import '../services/storage_service.dart';
 import '../widgets/heatmap_calendar.dart';
@@ -59,8 +60,8 @@ class _StatsPageState extends ConsumerState<StatsPage> {
     final tasks = ref.read(tasksProvider).valueOrNull ?? [];
 
     // 分离任务打卡和单次打卡
-    final taskRecords = records.where((r) => r.taskId != null).toList();
-    final oneTimeRecords = records.where((r) => r.taskId == null && r.topic != null).toList();
+    var taskRecords = records.where((r) => r.taskId != null).toList();
+    var oneTimeRecords = records.where((r) => r.taskId == null && r.topic != null).toList();
 
     if (taskRecords.isEmpty && oneTimeRecords.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -76,79 +77,17 @@ class _StatsPageState extends ConsumerState<StatsPage> {
     if (!mounted) return;
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(dateStr),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // 任务打卡
-            if (taskRecords.isNotEmpty) ...[
-              Text('任务打卡', style: Theme.of(ctx).textTheme.labelMedium?.copyWith(
-                color: Theme.of(ctx).colorScheme.onSurface.withValues(alpha: 0.5),
-              )),
-              const SizedBox(height: 4),
-              ...taskRecords.map((r) {
-                final task = tasks.where((t) => t.id == r.taskId).firstOrNull;
-                return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 2),
-                  child: Row(
-                    children: [
-                      Text(task?.icon ?? '📌', style: const TextStyle(fontSize: 16)),
-                      const SizedBox(width: 6),
-                      Expanded(child: Text(task?.name ?? '未知任务')),
-                    ],
-                  ),
-                );
-              }),
-            ],
-            // 单次打卡
-            if (oneTimeRecords.isNotEmpty) ...[
-              if (taskRecords.isNotEmpty) const SizedBox(height: 12),
-              Text('单次打卡', style: Theme.of(ctx).textTheme.labelMedium?.copyWith(
-                color: Theme.of(ctx).colorScheme.onSurface.withValues(alpha: 0.5),
-              )),
-              const SizedBox(height: 4),
-              ...oneTimeRecords.map((r) {
-                return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 2),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          const Icon(Icons.bookmark_outline_rounded, size: 16),
-                          const SizedBox(width: 6),
-                          Expanded(
-                            child: Text(r.topic!, style: const TextStyle(fontWeight: FontWeight.w500)),
-                          ),
-                        ],
-                      ),
-                      if (r.note != null && r.note!.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(left: 22),
-                          child: Text(
-                            r.note!,
-                            style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
-                              color: Theme.of(ctx).colorScheme.onSurface.withValues(alpha: 0.5),
-                              fontStyle: FontStyle.italic,
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                );
-              }),
-            ],
-          ],
-        ),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('关闭'),
-          ),
-        ],
+      builder: (ctx) => _DayDetailDialog(
+        dateStr: dateStr,
+        taskRecords: taskRecords,
+        oneTimeRecords: oneTimeRecords,
+        tasks: tasks,
+        onDelete: (recordId) {
+          ref.read(todayRecordsProvider.notifier).deleteRecord(recordId);
+          Navigator.pop(context);
+          // Refresh heatmap for this month
+          setState(() {});
+        },
       ),
     );
   }
@@ -374,6 +313,139 @@ class _SectionCard extends StatelessWidget {
   }
 }
 
+void _confirmDeleteRecord(BuildContext context, WidgetRef ref, String recordId, String label) {
+  showDialog(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('删除记录'),
+      content: Text('确定删除「$label」的打卡记录？'),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx),
+          child: const Text('取消'),
+        ),
+        TextButton(
+          onPressed: () {
+            Navigator.pop(ctx);
+            ref.read(todayRecordsProvider.notifier).deleteRecord(recordId);
+          },
+          child: Text('删除', style: TextStyle(color: Theme.of(ctx).colorScheme.error)),
+        ),
+      ],
+    ),
+  );
+}
+
+class _DayDetailDialog extends StatelessWidget {
+  final String dateStr;
+  final List<CheckInRecord> taskRecords;
+  final List<CheckInRecord> oneTimeRecords;
+  final List<CheckInTask> tasks;
+  final ValueChanged<String> onDelete;
+
+  const _DayDetailDialog({
+    required this.dateStr,
+    required this.taskRecords,
+    required this.oneTimeRecords,
+    required this.tasks,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return AlertDialog(
+      title: Text(dateStr),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 任务打卡
+          if (taskRecords.isNotEmpty) ...[
+            Text('任务打卡', style: theme.textTheme.labelMedium?.copyWith(
+              color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
+            )),
+            const SizedBox(height: 4),
+            ...taskRecords.map((r) {
+              final task = tasks.where((t) => t.id == r.taskId).firstOrNull;
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Row(
+                  children: [
+                    Text(task?.icon ?? '📌', style: const TextStyle(fontSize: 16)),
+                    const SizedBox(width: 6),
+                    Expanded(child: Text(task?.name ?? '未知任务')),
+                    IconButton(
+                      icon: Icon(Icons.close_rounded, size: 18, color: theme.colorScheme.error.withValues(alpha: 0.7)),
+                      onPressed: () => onDelete(r.id),
+                      tooltip: '删除',
+                      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                      padding: EdgeInsets.zero,
+                    ),
+                  ],
+                ),
+              );
+            }),
+          ],
+          // 单次打卡
+          if (oneTimeRecords.isNotEmpty) ...[
+            if (taskRecords.isNotEmpty) const SizedBox(height: 12),
+            Text('单次打卡', style: theme.textTheme.labelMedium?.copyWith(
+              color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
+            )),
+            const SizedBox(height: 4),
+            ...oneTimeRecords.map((r) {
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.bookmark_outline_rounded, size: 16),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(r.topic!, style: const TextStyle(fontWeight: FontWeight.w500)),
+                        ),
+                        IconButton(
+                          icon: Icon(Icons.close_rounded, size: 18, color: theme.colorScheme.error.withValues(alpha: 0.7)),
+                          onPressed: () => onDelete(r.id),
+                          tooltip: '删除',
+                          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                          padding: EdgeInsets.zero,
+                        ),
+                      ],
+                    ),
+                    if (r.note != null && r.note!.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 22),
+                        child: Text(
+                          r.note!,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurface.withValues(alpha: 0.5),
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              );
+            }),
+          ],
+        ],
+      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('关闭'),
+        ),
+      ],
+    );
+  }
+}
+
 class _StatBox extends StatelessWidget {
   final String label;
   final String value;
@@ -421,10 +493,10 @@ class _TaskDailyHistoryState extends ConsumerState<_TaskDailyHistory> {
 
   @override
   Widget build(BuildContext context) {
-    final historyAsync = ref.watch(dailyHistoryProvider(widget.task.id));
+    final recordsAsync = ref.watch(taskRecordsProvider(widget.task.id));
     final theme = Theme.of(context);
 
-    return historyAsync.when(
+    return recordsAsync.when(
       loading: () => const Padding(
         padding: EdgeInsets.symmetric(vertical: 8),
         child: Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))),
@@ -433,8 +505,19 @@ class _TaskDailyHistoryState extends ConsumerState<_TaskDailyHistory> {
         padding: const EdgeInsets.symmetric(vertical: 8),
         child: Text('加载失败: $e', style: const TextStyle(color: Colors.grey)),
       ),
-      data: (dates) {
-        if (dates.isEmpty) {
+      data: (records) {
+        // Deduplicate by date, keep latest record per date
+        final seenDates = <DateTime>{};
+        final uniqueRecords = <CheckInRecord>[];
+        for (final r in records) {
+          final d = r.date;
+          if (!seenDates.contains(d)) {
+            seenDates.add(d);
+            uniqueRecords.add(r);
+          }
+        }
+
+        if (uniqueRecords.isEmpty) {
           return Padding(
             padding: const EdgeInsets.symmetric(vertical: 8),
             child: Text(
@@ -444,8 +527,8 @@ class _TaskDailyHistoryState extends ConsumerState<_TaskDailyHistory> {
           );
         }
 
-        final displayDates = _expanded ? dates : dates.take(7).toList();
-        final total = dates.length;
+        final displayRecords = _expanded ? uniqueRecords : uniqueRecords.take(7).toList();
+        final total = uniqueRecords.length;
 
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 6),
@@ -454,7 +537,7 @@ class _TaskDailyHistoryState extends ConsumerState<_TaskDailyHistory> {
             children: [
               // Header
               InkWell(
-                onTap: dates.length > 7
+                onTap: uniqueRecords.length > 7
                     ? () => setState(() => _expanded = !_expanded)
                     : null,
                 borderRadius: BorderRadius.circular(8),
@@ -484,7 +567,7 @@ class _TaskDailyHistoryState extends ConsumerState<_TaskDailyHistory> {
                           ),
                         ),
                       ),
-                      if (dates.length > 7) ...[
+                      if (uniqueRecords.length > 7) ...[
                         const SizedBox(width: 8),
                         Icon(
                           _expanded ? Icons.expand_less_rounded : Icons.expand_more_rounded,
@@ -497,25 +580,32 @@ class _TaskDailyHistoryState extends ConsumerState<_TaskDailyHistory> {
                 ),
               ),
               const SizedBox(height: 6),
-              // Date chips
+              // Date chips with long-press delete
               Wrap(
                 spacing: 6,
                 runSpacing: 6,
-                children: displayDates.map((date) {
-                  return Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.primary.withValues(alpha: 0.08),
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(
-                        color: theme.colorScheme.primary.withValues(alpha: 0.15),
-                      ),
+                children: displayRecords.map((r) {
+                  final d = r.date;
+                  return InkWell(
+                    onLongPress: () => _confirmDeleteRecord(
+                      context, ref, r.id, '${widget.task.icon} ${widget.task.name} ${d.month}/${d.day}',
                     ),
-                    child: Text(
-                      '${date.month}/${date.day}',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.primary,
-                        fontWeight: FontWeight.w500,
+                    borderRadius: BorderRadius.circular(6),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: theme.colorScheme.primary.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: theme.colorScheme.primary.withValues(alpha: 0.15),
+                        ),
+                      ),
+                      child: Text(
+                        '${d.month}/${d.day}',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.primary,
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
                     ),
                   );
@@ -771,7 +861,16 @@ class _OneTimeTopicRowState extends ConsumerState<_OneTimeTopicRow> {
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ),
-                            ],
+                            ] else
+                              const Spacer(),
+                            IconButton(
+                              icon: Icon(Icons.close_rounded, size: 16,
+                                  color: theme.colorScheme.error.withValues(alpha: 0.6)),
+                              onPressed: () => _confirmDeleteRecord(context, ref, r.id, '${r.topic} ${r.checkedAt.month}/${r.checkedAt.day}'),
+                              tooltip: '删除',
+                              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                              padding: EdgeInsets.zero,
+                            ),
                           ],
                         ),
                       );
