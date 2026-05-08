@@ -1,8 +1,8 @@
 # PROJECT KNOWLEDGE BASE
 
-**Updated:** 2026-05-07
+**Updated:** 2026-05-08
 **Commit:** (pending)
-**Branch:** master
+**Branch:** main
 
 ## OVERVIEW
 
@@ -43,9 +43,9 @@ lib/
 |--------|------|------|------|
 | `CheckInTask` | model | `models/task.dart` | Task config with `cycleDays`, `cycleTarget`, `cycleStartDate`; `cyclePeriod()`, `currentCycleIndex`; `copyWith` with sentinel pattern |
 | `CheckInRecord` | model | `models/record.dart` | Check-in event, nullable `taskId`/`topic`/`note`, `date` getter normalizes to midnight |
-| `StorageService` | service | `services/storage_service.dart` | All Hive CRUD, streak/stats calculations, cycle/daily history, one-time check-in CRUD, topic aggregation, `exportData({includeRecords})`, `importData(json, {includeRecords})` |
+| `StorageService` | service | `services/storage_service.dart` | All Hive CRUD, streak/stats calculations, cycle/daily history, one-time check-in CRUD, topic aggregation, `deleteRecord`, `exportData({includeRecords})`, `importData(json, {includeRecords})` |
 | `tasksProvider` | AsyncNotifier | `providers/app_providers.dart` | Task CRUD, cross-invalidates `todayRecordsProvider` |
-| `todayRecordsProvider` | AsyncNotifier | `providers/app_providers.dart` | Today's records, check-in/undo operations |
+| `todayRecordsProvider` | AsyncNotifier | `providers/app_providers.dart` | Today's records, check-in/undo/delete operations with cascade invalidation |
 | `todayTasksProvider` | derived Provider | `providers/app_providers.dart` | Filters tasks by `shouldCheckIn(DateTime.now())` |
 | `streakProvider` | FutureProvider.family | `providers/app_providers.dart` | Per-task streak count |
 | `CheckInApp` | widget | `app.dart` | Theme builder (coral `#FF6B6B` + teal `#4ECDC4`) |
@@ -58,6 +58,7 @@ lib/
 | `oneTimeRecordsProvider` | FutureProvider | `providers/app_providers.dart` | All one-time check-in records |
 | `pastTopicsProvider` | FutureProvider | `providers/app_providers.dart` | Distinct past topics for autocomplete |
 | `topicsAggregatedProvider` | FutureProvider | `providers/app_providers.dart` | Topics grouped with count and latest date |
+| `taskRecordsProvider` | FutureProvider.family | `providers/app_providers.dart` | All records for a task (with ID, for delete operations) |
 | `_TaskForm` | widget | `pages/settings_page.dart` | Bottom sheet: name, emoji, weekday, time picker, cycleDays/cycleTarget steppers, cycleStartDate auto-set |
 
 ## CONVENTIONS
