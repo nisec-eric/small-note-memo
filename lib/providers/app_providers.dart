@@ -146,6 +146,7 @@ class TodayRecordsNotifier extends AsyncNotifier<List<CheckInRecord>> {
     ref.invalidate(cycleProgressProvider(taskId));
     ref.invalidate(cycleHistoryProvider(taskId));
     ref.invalidate(dailyHistoryProvider(taskId));
+    ref.invalidate(taskRecordsProvider(taskId));
     final now = DateTime.now();
     ref.invalidate(monthlyStatsProvider((year: now.year, month: now.month)));
   }
