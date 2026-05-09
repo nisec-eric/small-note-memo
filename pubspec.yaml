@@ -1,7 +1,7 @@
 name: check_in_memo
 description: "简洁美观的打卡记录 App"
 publish_to: 'none'
-version: 0.7.0+8
+version: 0.7.1+9
 
 environment:
   sdk: ^3.10.8

@@ -181,12 +181,28 @@ python3 -m http.server 9999
 - 各任务连续天数/周期数 + 🔥 火焰标识
 - 月度热力图（日历网格，颜色深浅表示打卡次数）
 - 打卡历史（每日任务显示打卡日期列表，周期任务显示每个周期完成情况）
+- 单次记录（按主题聚合，展开可查看/删除单条记录）
 
 ### 设置
 
 - 打卡任务管理（增删改）
 - 底部弹窗表单：名称、Emoji 图标选择、星期勾选、时间窗口、周期天数/目标配置
 - 导出/导入数据（支持选择是否包含打卡记录）
+
+## 自动发布
+
+推送 `v*` tag 到 GitHub 即自动触发 CI 构建并发布 Release：
+
+```bash
+git tag v0.7.1
+git push origin v0.7.1
+```
+
+Release 产物：
+- `check-in-memo-web.zip` — Web 静态文件
+- `check-in-memo-android-vX.X.X.apk` — Android ARM64 APK（统一签名）
+
+> **注意**：CI 需要配置 GitHub Secrets：`KEYSTORE_BASE64`（keystore 文件的 base64 编码）和 `KEYSTORE_PASSWORD`
 
 ## 配色
 

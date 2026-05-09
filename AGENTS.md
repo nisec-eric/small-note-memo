@@ -1,6 +1,6 @@
 # PROJECT KNOWLEDGE BASE
 
-**Updated:** 2026-05-08
+**Updated:** 2026-05-09
 **Commit:** (pending)
 **Branch:** main
 
@@ -45,7 +45,7 @@ lib/
 | `CheckInRecord` | model | `models/record.dart` | Check-in event, nullable `taskId`/`topic`/`note`, `date` getter normalizes to midnight |
 | `StorageService` | service | `services/storage_service.dart` | All Hive CRUD, streak/stats calculations, cycle/daily history, one-time check-in CRUD, topic aggregation, `deleteRecord`, `exportData({includeRecords})`, `importData(json, {includeRecords})` |
 | `tasksProvider` | AsyncNotifier | `providers/app_providers.dart` | Task CRUD, cross-invalidates `todayRecordsProvider` |
-| `todayRecordsProvider` | AsyncNotifier | `providers/app_providers.dart` | Today's records, check-in/undo/delete operations with cascade invalidation |
+| `todayRecordsProvider` | AsyncNotifier | `providers/app_providers.dart` | Today's records, check-in/undo/delete operations with cascade invalidation. `_invalidateStats(taskId)` must include `taskRecordsProvider` |
 | `todayTasksProvider` | derived Provider | `providers/app_providers.dart` | Filters tasks by `shouldCheckIn(DateTime.now())` |
 | `streakProvider` | FutureProvider.family | `providers/app_providers.dart` | Per-task streak count |
 | `CheckInApp` | widget | `app.dart` | Theme builder (coral `#FF6B6B` + teal `#4ECDC4`) |
@@ -68,6 +68,8 @@ lib/
 - **Sentinel `copyWith`** — `CheckInTask.copyWith()` uses `Object? _sentinel` to allow clearing nullable fields (`startMinutes`, `endMinutes`, `reminderMinutes`) back to null. Pass explicitly: `task.copyWith(startMinutes: null)` clears it; omit param keeps old value
 - **Defensive list copy** — `_selectedDays.toList()` when passing mutable lists from UI to storage
 - **Provider self-invalidation** — `ref.invalidateSelf()` after all mutations; cross-invalidate `todayRecordsProvider` when tasks are deleted
+- **Provider cascade invalidation** — `_invalidateStats(taskId)` must invalidate: `streakProvider`, `cycleProgressProvider`, `cycleHistoryProvider`, `dailyHistoryProvider`, `taskRecordsProvider`, `monthlyStatsProvider`. Missing any causes stale UI
+- **Record deletion** — `deleteRecord()` queries storage for record info (not provider state) so it works for non-today records too; invalidates `oneTimeRecordsProvider`, `pastTopicsProvider`, `topicsAggregatedProvider`, and record's month `monthlyStatsProvider`
 - **Theme-derived colors** — Read `Theme.of(context).colorScheme.primary` in widgets, don't hardcode hex values
 - **fl_chart 0.69.x API** — `tooltipRoundedRadius` (not `tooltipBorderRadius`), `SideTitleWidget(axisSide: meta.axisSide, child:)` (not `meta:`)
 - **Fixed cycle periods** — Cycles use `cycleStartDate` as anchor, periods are `[start + N*cycleDays, start + (N+1)*cycleDays - 1]`, NOT rolling windows
@@ -92,6 +94,7 @@ lib/
 - `Hive.initFlutter()` works on both web (IndexedDB) and Android (file system)
 - `intl` Chinese locale requires `await initializeDateFormatting('zh_CN')` in `main()` before any `DateFormat` call
 - Web: `flutter build web --release` produces static files, serve with any HTTP server
+- **Release signing** — Uses fixed keystore (`android/app/release.jks`) + `key.properties`. Local build requires `android/app/key.properties` with credentials; without it falls back to debug signing. CI reads keystore from `KEYSTORE_BASE64` and `KEYSTORE_PASSWORD` GitHub Secrets
 
 ## COMMANDS
 
